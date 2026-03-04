@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(/c/Users/miche/AppData/Roaming/Python/Scripts/uv.exe run:*)",
+      "Bash(pkill:*)",
+      "Bash(netstat:*)",
+      "Bash(taskkill:*)",
+      "Bash(/c/Users/miche/AppData/Roaming/Python/Scripts/uv.exe sync:*)",
+      "Bash(uv run:*)",
+      "Bash(psql:*)"
+    ]
+  }
+}

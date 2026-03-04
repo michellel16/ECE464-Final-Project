@@ -1,8 +1,21 @@
 [project]
-name = "pythonproject1"
+name = "tunelog-backend"
 version = "0.1.0"
-description = "Add your description here"
-requires-python = ">=3.14"
+description = "Tunelog — Music cataloging and sharing platform"
+requires-python = ">=3.11"
 dependencies = [
-    "fastapi>=0.131.0",
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "sqlalchemy>=2.0.0",
+    "psycopg2-binary>=2.9.0",
+    "alembic>=1.12.0",
+    "python-jose[cryptography]>=3.3.0",
+    "passlib>=1.7.4",
+    "python-multipart>=0.0.6",
+    "pydantic[email]>=2.5.0",
+    "email-validator>=2.0.0",
+    "python-dotenv>=1.0.0",
 ]
+
+[tool.uv]
+package = false
