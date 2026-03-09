@@ -17,6 +17,8 @@ export default function Stats() {
 
   if (loading) return <Loader />
 
+  const ap = stats.audio_profile
+
   return (
     <div className="max-w-5xl mx-auto px-4 py-8 space-y-8">
       <div>
@@ -35,6 +37,52 @@ export default function Stats() {
           emoji="⭐"
         />
       </div>
+
+      {/* Audio profile (Spotify) */}
+      {ap && ap.songs_with_features > 0 && (
+        <div className="card p-5 space-y-5">
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div>
+              <h2 className="font-bold text-white flex items-center gap-2">
+                <SpotifyIcon className="text-green-500 w-5 h-5" />
+                Sound Profile
+              </h2>
+              <p className="text-gray-500 text-xs mt-0.5">Based on {ap.songs_with_features} tracked song{ap.songs_with_features !== 1 ? 's' : ''} with Spotify data</p>
+            </div>
+            {ap.personality && (
+              <span className="px-3 py-1 rounded-full bg-green-900/40 border border-green-700/50 text-green-400 text-sm font-medium">
+                {ap.personality}
+              </span>
+            )}
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-10 gap-y-4">
+            <AudioBar label="Energy"           value={ap.energy}           color="from-orange-500 to-red-500" />
+            <AudioBar label="Danceability"     value={ap.danceability}     color="from-pink-500 to-violet-500" />
+            <AudioBar label="Positivity"       value={ap.valence}          color="from-yellow-400 to-green-500" />
+            <AudioBar label="Acousticness"     value={ap.acousticness}     color="from-blue-400 to-teal-500" />
+            <AudioBar label="Instrumentalness" value={ap.instrumentalness} color="from-violet-500 to-indigo-500" />
+            {ap.tempo && (
+              <div className="flex justify-between items-center text-sm">
+                <span className="text-gray-400">Avg Tempo</span>
+                <span className="text-white font-medium">{Math.round(ap.tempo)} BPM</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {ap && ap.songs_with_features === 0 && stats.songs_listened > 0 && (
+        <div className="card p-5 flex items-center gap-4">
+          <SpotifyIcon className="text-green-500 w-8 h-8 shrink-0" />
+          <div>
+            <p className="text-white font-medium">No audio data yet</p>
+            <p className="text-gray-500 text-sm">
+              Connect Spotify and import tracks to see your Sound Profile.{' '}
+              <Link to={`/users/${user?.username}`} className="text-violet-400 hover:text-violet-300 transition-colors">Go to profile</Link>
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="grid lg:grid-cols-2 gap-6">
         {/* Top genres */}
@@ -133,6 +181,32 @@ export default function Stats() {
         </div>
       )}
     </div>
+  )
+}
+
+function AudioBar({ label, value, color }) {
+  if (value == null) return null
+  return (
+    <div>
+      <div className="flex justify-between text-sm mb-1.5">
+        <span className="text-gray-400">{label}</span>
+        <span className="text-gray-300 font-medium">{Math.round(value * 100)}%</span>
+      </div>
+      <div className="h-2.5 bg-gray-800 rounded-full overflow-hidden">
+        <div
+          className={`h-full bg-gradient-to-r ${color} rounded-full transition-all`}
+          style={{ width: `${value * 100}%` }}
+        />
+      </div>
+    </div>
+  )
+}
+
+function SpotifyIcon({ className = '' }) {
+  return (
+    <svg viewBox="0 0 24 24" className={`fill-current ${className}`} xmlns="http://www.w3.org/2000/svg">
+      <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/>
+    </svg>
   )
 }
 

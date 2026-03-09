@@ -1,4 +1,3 @@
-
 from datetime import datetime
 from sqlalchemy import (
     Column, Integer, String, Text, Float, Boolean,
@@ -41,6 +40,7 @@ class Artist(Base):
     image_url   = Column(String,      nullable=True)
     formed_year = Column(Integer,     nullable=True)
     country     = Column(String(50),  nullable=True)
+    spotify_id  = Column(String(100), nullable=True, index=True)
 
     genres  = relationship("Genre",  secondary=artist_genre, back_populates="artists")
     albums  = relationship("Album",  back_populates="artist")
@@ -55,6 +55,7 @@ class Album(Base):
     release_date = Column(String(20), nullable=True)
     cover_url    = Column(String,     nullable=True)
     description  = Column(Text,       nullable=True)
+    spotify_id   = Column(String(100), nullable=True, index=True)
 
     artist        = relationship("Artist",          back_populates="albums")
     genres        = relationship("Genre",           secondary=album_genre, back_populates="albums")
@@ -72,6 +73,16 @@ class Song(Base):
     album_id         = Column(Integer, ForeignKey("albums.id"),  nullable=True)
     duration_seconds = Column(Integer, nullable=True)
     track_number     = Column(Integer, nullable=True)
+    # Spotify fields
+    spotify_id          = Column(String(100), nullable=True, index=True)
+    spotify_preview_url = Column(String,      nullable=True)
+    danceability        = Column(Float, nullable=True)
+    energy              = Column(Float, nullable=True)
+    valence             = Column(Float, nullable=True)
+    loudness            = Column(Float, nullable=True)
+    tempo               = Column(Float, nullable=True)
+    acousticness        = Column(Float, nullable=True)
+    instrumentalness    = Column(Float, nullable=True)
 
     artist        = relationship("Artist",         back_populates="songs")
     album         = relationship("Album",          back_populates="songs")
@@ -92,6 +103,13 @@ class User(Base):
     avatar_url      = Column(String, nullable=True)
     created_at      = Column(DateTime, default=datetime.utcnow)
     is_active       = Column(Boolean, default=True)
+    # Spotify OAuth
+    spotify_id                = Column(String(100), nullable=True)
+    spotify_access_token      = Column(String,      nullable=True)
+    spotify_refresh_token     = Column(String,      nullable=True)
+    spotify_token_expires_at  = Column(DateTime,    nullable=True)
+    spotify_display_name      = Column(String(100), nullable=True)
+    spotify_image_url         = Column(String,      nullable=True)
 
     reviews       = relationship("Review",          back_populates="user")
     lists         = relationship("List",            back_populates="user")

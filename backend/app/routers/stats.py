@@ -79,6 +79,35 @@ def my_stats(db: Session = Depends(get_db), current_user: models.User = Depends(
             row["target_artist"] = r.song.artist.name
         recent_out.append(row)
 
+    # Audio profile — averages across listened songs with Spotify feature data
+    listened_song_ids = [
+        row[0] for row in
+        db.query(models.UserSongStatus.song_id)
+        .filter_by(user_id=uid, status="listened")
+        .all()
+    ]
+    audio_profile = None
+    if listened_song_ids:
+        feature_songs = (
+            db.query(models.Song)
+            .filter(
+                models.Song.id.in_(listened_song_ids),
+                models.Song.energy.isnot(None),
+            )
+            .all()
+        )
+        if feature_songs:
+            n = len(feature_songs)
+            avgs = {
+                "energy":           round(sum(s.energy           or 0 for s in feature_songs) / n, 3),
+                "danceability":     round(sum(s.danceability     or 0 for s in feature_songs) / n, 3),
+                "valence":          round(sum(s.valence          or 0 for s in feature_songs) / n, 3),
+                "acousticness":     round(sum(s.acousticness     or 0 for s in feature_songs) / n, 3),
+                "instrumentalness": round(sum(s.instrumentalness or 0 for s in feature_songs) / n, 3),
+                "tempo":            round(sum(s.tempo            or 0 for s in feature_songs) / n, 1),
+            }
+            audio_profile = {"songs_with_features": n, **avgs, "personality": _compute_personality(avgs)}
+
     return {
         "albums_listened":    albums_listened,
         "songs_listened":     songs_listened,
@@ -87,4 +116,36 @@ def my_stats(db: Session = Depends(get_db), current_user: models.User = Depends(
         "top_genres":         [{"name": n, "count": c} for n, c in top_genres],
         "rating_distribution": distribution,
         "recent_reviews":     recent_out,
+        "audio_profile":      audio_profile,
     }
+
+
+def _compute_personality(avg: dict) -> str:
+    labels = []
+    energy       = avg.get("energy", 0.5)
+    danceability = avg.get("danceability", 0.5)
+    valence      = avg.get("valence", 0.5)
+    acousticness = avg.get("acousticness", 0.5)
+    instrumental = avg.get("instrumentalness", 0.5)
+
+    if energy > 0.7 and danceability > 0.6:
+        labels.append("high-energy & danceable")
+    elif energy > 0.7:
+        labels.append("high-energy")
+    elif energy < 0.35:
+        labels.append("low-key & relaxed")
+
+    if acousticness > 0.6:
+        labels.append("acoustic")
+
+    if valence < 0.35:
+        labels.append("melancholic")
+    elif valence > 0.7:
+        labels.append("upbeat & positive")
+
+    if instrumental > 0.5:
+        labels.append("instrumental")
+
+    if not labels:
+        return "Eclectic taste"
+    return " / ".join(labels).capitalize() + " music fan"

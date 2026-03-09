@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .seed import seed_database
-from .routers import auth, users, music, lists, social, search, stats
+from .routers import auth, users, music, lists, social, search, stats, spotify
 
 app = FastAPI(title="Tunelog API", version="1.0.0")
 
@@ -21,6 +21,7 @@ app.include_router(lists.router)
 app.include_router(social.router)
 app.include_router(search.router)
 app.include_router(stats.router)
+app.include_router(spotify.router)
 
 
 @app.on_event("startup")
