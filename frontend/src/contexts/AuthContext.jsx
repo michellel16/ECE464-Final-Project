@@ -47,8 +47,14 @@ export function AuthProvider({ children }) {
     _clearToken()
   }
 
+  async function refreshUser() {
+    const me = await axios.get('/api/auth/me')
+    setUser(me.data)
+    return me.data
+  }
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, register }}>
+    <AuthContext.Provider value={{ user, loading, login, logout, register, refreshUser }}>
       {children}
     </AuthContext.Provider>
   )

@@ -44,6 +44,18 @@ export default function Lists() {
     setSelected(res.data)
   }
 
+  async function togglePublic(list) {
+    const updated = { ...list, is_public: !list.is_public }
+    await axios.put(`/api/lists/${list.id}`, {
+      name: list.name,
+      description: list.description ?? '',
+      list_type: list.list_type,
+      is_public: updated.is_public,
+    })
+    setLists(prev => prev.map(l => l.id === list.id ? { ...l, is_public: updated.is_public } : l))
+    if (selected?.id === list.id) setSelected(prev => ({ ...prev, is_public: updated.is_public }))
+  }
+
   async function removeItem(listId, itemId) {
     await axios.delete(`/api/lists/${listId}/items/${itemId}`)
     setSelected(prev => ({
@@ -161,12 +173,24 @@ export default function Lists() {
                     <span>{selected.items?.length ?? 0} items</span>
                   </div>
                 </div>
-                <button
-                  onClick={() => deleteList(selected.id)}
-                  className="text-red-400 hover:text-red-300 text-sm transition-colors"
-                >
-                  Delete list
-                </button>
+                <div className="flex items-center gap-3 shrink-0">
+                  <button
+                    onClick={() => togglePublic(selected)}
+                    className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
+                      selected.is_public
+                        ? 'border-gray-600 text-gray-400 hover:border-red-700 hover:text-red-400'
+                        : 'border-green-700/50 text-green-400 hover:bg-green-700/20'
+                    }`}
+                  >
+                    {selected.is_public ? 'Make Private' : 'Make Public'}
+                  </button>
+                  <button
+                    onClick={() => deleteList(selected.id)}
+                    className="text-red-400 hover:text-red-300 text-sm transition-colors"
+                  >
+                    Delete
+                  </button>
+                </div>
               </div>
 
               {!selected.items?.length ? (

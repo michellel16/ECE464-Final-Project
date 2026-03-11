@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
@@ -18,9 +20,13 @@ def get_feed(
     following_ids = [f.followed_id for f in current_user.following]
     following_ids.append(current_user.id)
 
+    one_month_ago = datetime.utcnow() - timedelta(days=30)
     activities = (
         db.query(models.Activity)
-        .filter(models.Activity.user_id.in_(following_ids))
+        .filter(
+            models.Activity.user_id.in_(following_ids),
+            models.Activity.created_at >= one_month_ago,
+        )
         .order_by(models.Activity.created_at.desc())
         .offset(skip).limit(limit).all()
     )

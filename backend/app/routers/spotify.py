@@ -150,7 +150,7 @@ async def get_auth_url(current_user: models.User = Depends(get_current_user)):
         "redirect_uri":  SPOTIFY_REDIRECT_URI,
         "scope":         SPOTIFY_SCOPES,
         "state":         state,
-        "show_dialog":   "false",
+        "show_dialog":   "true",
     })
     return {"url": f"https://accounts.spotify.com/authorize?{params}"}
 
@@ -294,15 +294,20 @@ async def spotify_playlists(
                 raise HTTPException(status_code=502, detail="Failed to fetch playlists")
             data = resp.json()
             for p in data.get("items", []):
-                if p:
-                    images = p.get("images") or []
-                    playlists.append({
-                        "id":          p["id"],
-                        "name":        p["name"],
-                        "track_count": p["tracks"]["total"],
-                        "image_url":   images[0]["url"] if images else None,
-                        "owner":       p["owner"]["display_name"],
-                    })
+                if not p or not p.get("id"):
+                    continue
+                owner = p.get("owner") or {}
+                # Only include playlists the user created themselves
+                if owner.get("id") != current_user.spotify_id:
+                    continue
+                images = p.get("images") or []
+                tracks_obj = p.get("tracks") or {}
+                playlists.append({
+                    "id":          p["id"],
+                    "name":        p.get("name", "Untitled"),
+                    "track_count": tracks_obj.get("total", 0),
+                    "image_url":   images[0]["url"] if images else None,
+                })
             url = data.get("next")
     return playlists
 
@@ -316,17 +321,20 @@ async def spotify_playlist_tracks(
     """Fetch tracks from a Spotify playlist, annotating which ones are already in Tunelog."""
     token = await _get_valid_token(current_user, db)
     tracks = []
-    url = f"https://api.spotify.com/v1/playlists/{playlist_id}/tracks?limit=100&fields=next,items(track(id,name,duration_ms,preview_url,artists,album))"
+    url = f"https://api.spotify.com/v1/playlists/{playlist_id}/items?limit=100"
 
     async with httpx.AsyncClient() as client:
         while url:
             resp = await client.get(url, headers=_spotify_headers(token))
             if resp.status_code != 200:
-                raise HTTPException(status_code=502, detail="Failed to fetch playlist tracks")
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Spotify returned {resp.status_code}: {resp.text[:200]}"
+                )
             data = resp.json()
             for item in data.get("items", []):
-                track = item.get("track")
-                if not track or not track.get("id"):
+                track = item.get("item") or item.get("track")
+                if not track or not track.get("id") or track.get("type") != "track":
                     continue
                 artists = track.get("artists", [])
                 album   = track.get("album", {})

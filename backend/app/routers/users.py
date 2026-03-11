@@ -35,6 +35,18 @@ def update_profile(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
+    if update.username is not None:
+        new_username = update.username.strip()
+        if not new_username:
+            raise HTTPException(status_code=400, detail="Username cannot be empty")
+        if new_username != current_user.username:
+            taken = db.query(models.User).filter(
+                models.User.username == new_username,
+                models.User.id != current_user.id,
+            ).first()
+            if taken:
+                raise HTTPException(status_code=409, detail="Username already taken")
+            current_user.username = new_username
     if update.bio is not None:
         current_user.bio = update.bio
     if update.avatar_url is not None:
