@@ -1,9 +1,16 @@
-from fastapi import APIRouter, Depends, HTTPException
+import uuid
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 
 from .. import models, schemas
 from ..database import get_db
 from ..auth import get_current_user
+
+AVATARS_DIR = Path(__file__).parent.parent / "static" / "avatars"
+ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+MAX_SIZE_BYTES = 5 * 1024 * 1024  # 5 MB
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
@@ -56,6 +63,35 @@ def update_profile(
     current_user.follower_count = len(current_user.followers)
     current_user.following_count = len(current_user.following)
     return current_user
+
+
+@router.post("/me/avatar")
+async def upload_avatar(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    if file.content_type not in ALLOWED_TYPES:
+        raise HTTPException(status_code=400, detail="Only JPEG, PNG, WebP, or GIF images are allowed")
+
+    data = await file.read()
+    if len(data) > MAX_SIZE_BYTES:
+        raise HTTPException(status_code=400, detail="File too large (max 5 MB)")
+
+    # Delete old avatar file if it was an uploaded one
+    if current_user.avatar_url and current_user.avatar_url.startswith("/static/avatars/"):
+        old_path = Path(__file__).parent.parent / current_user.avatar_url.lstrip("/")
+        if old_path.exists():
+            old_path.unlink()
+
+    ext = file.content_type.split("/")[-1].replace("jpeg", "jpg")
+    filename = f"{current_user.id}_{uuid.uuid4().hex[:8]}.{ext}"
+    dest = AVATARS_DIR / filename
+    dest.write_bytes(data)
+
+    current_user.avatar_url = f"/static/avatars/{filename}"
+    db.commit()
+    return {"avatar_url": current_user.avatar_url}
 
 
 @router.post("/{username}/follow")

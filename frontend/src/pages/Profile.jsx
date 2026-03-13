@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, Link, useSearchParams, useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import { useAuth } from '../contexts/AuthContext'
@@ -118,7 +118,7 @@ export default function Profile() {
       {/* Profile header */}
       <div className="card p-6 mb-6">
         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-5">
-          <Avatar username={profile.username} size={20} className="ring-4 ring-violet-700/40" />
+          <Avatar username={profile.username} avatarUrl={profile.avatar_url} size={20} className="ring-4 ring-violet-700/40" />
           <div className="flex-1 min-w-0">
             <h1 className="text-2xl font-bold text-white">{profile.username}</h1>
             {profile.bio && <p className="text-gray-400 mt-1 text-sm">{profile.bio}</p>}
@@ -689,10 +689,33 @@ function ImportModal({ onClose }) {
 // ── Edit Profile Modal ────────────────────────────────────────────────────────
 
 function EditProfileModal({ profile, onClose, onSaved }) {
-  const [username, setUsername] = useState(profile.username)
-  const [bio, setBio]           = useState(profile.bio ?? '')
-  const [saving, setSaving]     = useState(false)
-  const [error, setError]       = useState(null)
+  const [username, setUsername]     = useState(profile.username)
+  const [bio, setBio]               = useState(profile.bio ?? '')
+  const [saving, setSaving]         = useState(false)
+  const [error, setError]           = useState(null)
+  const [avatarPreview, setAvatarPreview] = useState(profile.avatar_url ?? null)
+  const [avatarUploading, setAvatarUploading] = useState(false)
+  const [avatarError, setAvatarError] = useState(null)
+  const fileInputRef = useRef(null)
+
+  async function handleAvatarChange(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setAvatarPreview(URL.createObjectURL(file))
+    setAvatarError(null)
+    setAvatarUploading(true)
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      const { data } = await axios.post('/api/users/me/avatar', form)
+      setAvatarPreview(data.avatar_url)
+    } catch (e) {
+      setAvatarError(e.response?.data?.detail || 'Upload failed')
+      setAvatarPreview(profile.avatar_url ?? null)
+    } finally {
+      setAvatarUploading(false)
+    }
+  }
 
   async function save() {
     const trimmed = username.trim()
@@ -704,7 +727,7 @@ function EditProfileModal({ profile, onClose, onSaved }) {
         username: trimmed,
         bio: bio.trim() || null,
       })
-      onSaved({ username: data.username, bio: data.bio })
+      onSaved({ username: data.username, bio: data.bio, avatar_url: data.avatar_url })
     } catch (e) {
       setError(e.response?.data?.detail || 'Save failed')
     } finally {
@@ -720,6 +743,41 @@ function EditProfileModal({ profile, onClose, onSaved }) {
           <button onClick={onClose} className="text-gray-500 hover:text-white text-xl leading-none">&times;</button>
         </div>
         <div className="p-5 space-y-4">
+          {/* Avatar picker */}
+          <div className="flex flex-col items-center gap-2">
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="relative group"
+              title="Change profile picture"
+            >
+              {avatarPreview ? (
+                <img src={avatarPreview} alt="avatar" className="w-20 h-20 rounded-full object-cover ring-2 ring-violet-700/50" />
+              ) : (
+                <Avatar username={username} size={20} />
+              )}
+              <div className="absolute inset-0 rounded-full bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                {avatarUploading ? (
+                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                )}
+              </div>
+            </button>
+            <p className="text-xs text-gray-500">Click to change photo</p>
+            {avatarError && <p className="text-red-400 text-xs">{avatarError}</p>}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/gif"
+              className="hidden"
+              onChange={handleAvatarChange}
+            />
+          </div>
+
           <div>
             <label className="block text-sm text-gray-400 mb-1">Username</label>
             <input
@@ -745,7 +803,7 @@ function EditProfileModal({ profile, onClose, onSaved }) {
         </div>
         <div className="flex justify-end gap-2 p-5 pt-0">
           <button onClick={onClose} className="btn-secondary text-sm">Cancel</button>
-          <button onClick={save} disabled={saving} className="btn-primary text-sm disabled:opacity-50">
+          <button onClick={save} disabled={saving || avatarUploading} className="btn-primary text-sm disabled:opacity-50">
             {saving ? 'Saving…' : 'Save'}
           </button>
         </div>
@@ -788,7 +846,7 @@ function FollowListModal({ username, type, onClose }) {
                 onClick={onClose}
                 className="flex items-center gap-3 px-5 py-3 hover:bg-gray-800 transition-colors"
               >
-                <Avatar username={u.username} size={9} />
+                <Avatar username={u.username} avatarUrl={u.avatar_url} size={9} />
                 <div className="min-w-0">
                   <p className="text-white text-sm font-medium">{u.username}</p>
                   {u.bio && <p className="text-gray-500 text-xs truncate">{u.bio}</p>}

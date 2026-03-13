@@ -123,6 +123,8 @@ def get_album(album_id: int, db: Session = Depends(get_db)):
                 "id": s.id, "title": s.title,
                 "track_number": s.track_number, "duration_seconds": s.duration_seconds,
                 "average_rating": _avg_rating(db, song_id=s.id),
+                "spotify_id": s.spotify_id,
+                "spotify_preview_url": s.spotify_preview_url,
             }
             for s in al.songs
         ],
@@ -162,6 +164,11 @@ def get_song(song_id: int, db: Session = Depends(get_db)):
         "duration_seconds": s.duration_seconds, "track_number": s.track_number,
         "average_rating": _avg_rating(db, song_id=s.id),
         "review_count": _review_count(db, song_id=s.id),
+        "spotify_id": s.spotify_id,
+        "spotify_preview_url": s.spotify_preview_url,
+        "danceability": s.danceability, "energy": s.energy, "valence": s.valence,
+        "loudness": s.loudness, "tempo": s.tempo, "acousticness": s.acousticness,
+        "instrumentalness": s.instrumentalness,
     }
 
 

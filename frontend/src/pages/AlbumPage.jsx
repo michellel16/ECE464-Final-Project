@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import axios from 'axios'
 import { useAuth } from '../contexts/AuthContext'
@@ -24,6 +24,8 @@ export default function AlbumPage() {
   const [saving, setSaving]     = useState(false)
   const [addingList, setAddingList] = useState(false)
   const [myLists, setMyLists]   = useState([])
+  const [playingId, setPlayingId] = useState(null)
+  const audioRef = useRef(null)
 
   useEffect(() => {
     const fetches = [
@@ -83,6 +85,22 @@ export default function AlbumPage() {
   async function addToList(listId) {
     await axios.post(`/api/lists/${listId}/items`, { album_id: parseInt(id) })
     setAddingList(false)
+  }
+
+  function playPreview(songId, previewUrl) {
+    if (playingId === songId) {
+      audioRef.current?.pause()
+      setPlayingId(null)
+      return
+    }
+    if (audioRef.current) {
+      audioRef.current.pause()
+    }
+    const audio = new Audio(previewUrl)
+    audioRef.current = audio
+    audio.play()
+    setPlayingId(songId)
+    audio.onended = () => setPlayingId(null)
   }
 
   if (loading) return <Loader />
@@ -209,14 +227,28 @@ export default function AlbumPage() {
           <h2 className="text-lg font-bold text-white mb-3">Tracklist</h2>
           <div className="card divide-y divide-gray-800">
             {album.songs?.map(s => (
-              <Link key={s.id} to={`/songs/${s.id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-800/50 transition-colors group">
-                <span className="text-gray-600 text-xs w-5 text-right">{s.track_number}</span>
-                <span className="text-white text-sm flex-1 group-hover:text-violet-400 transition-colors">{s.title}</span>
+              <div key={s.id} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-800/50 transition-colors group">
+                {s.spotify_preview_url ? (
+                  <button
+                    onClick={() => playPreview(s.id, s.spotify_preview_url)}
+                    className="w-6 h-6 flex items-center justify-center rounded-full bg-violet-600 hover:bg-violet-500 transition-colors shrink-0"
+                    title={playingId === s.id ? 'Pause preview' : 'Play 30s preview'}
+                  >
+                    {playingId === s.id ? (
+                      <svg viewBox="0 0 24 24" className="w-3 h-3 fill-white"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+                    ) : (
+                      <svg viewBox="0 0 24 24" className="w-3 h-3 fill-white"><polygon points="5,3 19,12 5,21"/></svg>
+                    )}
+                  </button>
+                ) : (
+                  <span className="text-gray-600 text-xs w-6 text-right shrink-0">{s.track_number}</span>
+                )}
+                <Link to={`/songs/${s.id}`} className="text-white text-sm flex-1 group-hover:text-violet-400 transition-colors">{s.title}</Link>
                 <span className="text-gray-600 text-xs">{formatDuration(s.duration_seconds)}</span>
                 {s.average_rating && (
                   <span className="text-yellow-500 text-xs font-bold">★{s.average_rating}</span>
                 )}
-              </Link>
+              </div>
             ))}
           </div>
         </div>

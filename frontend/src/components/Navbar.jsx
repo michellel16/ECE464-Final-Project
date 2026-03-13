@@ -78,7 +78,7 @@ export default function Navbar() {
                 onClick={() => setMenu(!menuOpen)}
                 className="flex items-center gap-2 bg-gray-800 hover:bg-gray-700 rounded-full px-3 py-1.5 transition-colors"
               >
-                <Avatar username={user.username} size={6} />
+                <Avatar username={user.username} avatarUrl={user.avatar_url} size={6} />
                 <span className="text-sm text-gray-200 hidden sm:block">{user.username}</span>
               </button>
               {menuOpen && (
@@ -88,7 +88,7 @@ export default function Navbar() {
                     className="flex items-center gap-2 px-4 py-2.5 text-sm text-gray-300 hover:bg-gray-800 hover:text-white"
                     onClick={() => setMenu(false)}
                   >
-                    <Avatar username={user.username} size={6} />
+                    <Avatar username={user.username} avatarUrl={user.avatar_url} size={6} />
                     Profile
                   </Link>
                   <Link
@@ -128,7 +128,7 @@ export default function Navbar() {
   )
 }
 
-export function Avatar({ username, size = 8, className = '' }) {
+export function Avatar({ username, avatarUrl = null, size = 8, className = '' }) {
   const colors = [
     'from-violet-500 to-pink-500',
     'from-blue-500 to-violet-500',
@@ -136,8 +136,18 @@ export function Avatar({ username, size = 8, className = '' }) {
     'from-emerald-500 to-teal-500',
     'from-amber-500 to-orange-500',
   ]
-  const idx   = username ? username.charCodeAt(0) % colors.length : 0
+  const idx = username ? username.charCodeAt(0) % colors.length : 0
   const sizeClass = `w-${size} h-${size}`
+
+  if (avatarUrl) {
+    return (
+      <img
+        src={avatarUrl}
+        alt={username}
+        className={`${sizeClass} rounded-full object-cover shrink-0 ${className}`}
+      />
+    )
+  }
 
   return (
     <div
