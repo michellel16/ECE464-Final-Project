@@ -405,21 +405,41 @@ async def import_track(
         )
         features = features_resp.json() if features_resp.status_code == 200 else {}
 
-    # Resolve artist
-    sp_artists = track.get("artists", [])
-    sp_artist  = sp_artists[0] if sp_artists else {}
-    artist = db.query(models.Artist).filter(models.Artist.spotify_id == sp_artist.get("id")).first()
-    if not artist and sp_artist.get("name"):
-        artist = db.query(models.Artist).filter(
-            models.Artist.name.ilike(sp_artist["name"])
-        ).first()
-    if not artist:
-        artist = models.Artist(
-            name=sp_artist.get("name", "Unknown Artist"),
-            spotify_id=sp_artist.get("id"),
-        )
-        db.add(artist)
-        db.flush()
+        # Resolve artist — update existing artists' missing fields
+        sp_artists = track.get("artists", [])
+        sp_artist  = sp_artists[0] if sp_artists else {}
+        artist = db.query(models.Artist).filter(models.Artist.spotify_id == sp_artist.get("id")).first()
+        if not artist and sp_artist.get("name"):
+            artist = db.query(models.Artist).filter(
+                models.Artist.name.ilike(sp_artist["name"])
+            ).first()
+
+        # Fetch full artist from Spotify if we need the image
+        sp_artist_full = None
+        if sp_artist.get("id") and (not artist or not artist.image_url):
+            art_resp = await client.get(
+                f"https://api.spotify.com/v1/artists/{sp_artist['id']}",
+                headers=_spotify_headers(token),
+            )
+            if art_resp.status_code == 200:
+                sp_artist_full = art_resp.json()
+
+        if artist:
+            # Fill in any missing fields on the existing artist
+            if not artist.spotify_id and sp_artist.get("id"):
+                artist.spotify_id = sp_artist["id"]
+            if not artist.image_url and sp_artist_full:
+                images = sp_artist_full.get("images") or []
+                if images:
+                    artist.image_url = images[0]["url"]
+        else:
+            artist = models.Artist(
+                name=sp_artist.get("name", "Unknown Artist"),
+                spotify_id=sp_artist.get("id"),
+                image_url=(sp_artist_full.get("images") or [{}])[0].get("url") if sp_artist_full else None,
+            )
+            db.add(artist)
+            db.flush()
 
     # Resolve album
     sp_album = track.get("album", {})
@@ -429,8 +449,14 @@ async def import_track(
             models.Album.title.ilike(sp_album["name"]),
             models.Album.artist_id == artist.id,
         ).first()
-    if not album and sp_album.get("name"):
-        sp_images = sp_album.get("images") or []
+    sp_images = sp_album.get("images") or []
+    if album:
+        # Fill in any missing fields on the existing album
+        if not album.spotify_id and sp_album.get("id"):
+            album.spotify_id = sp_album["id"]
+        if not album.cover_url and sp_images:
+            album.cover_url = sp_images[0]["url"]
+    elif sp_album.get("name"):
         release_date = sp_album.get("release_date")
         album = models.Album(
             title=sp_album["name"],
@@ -461,12 +487,6 @@ async def import_track(
         instrumentalness=features.get("instrumentalness"),
     )
     db.add(song)
-    db.add(models.Activity(
-        user_id=current_user.id,
-        action_type="imported_track",
-        target_type="song",
-        meta=f'{{"spotify_id":"{spotify_track_id}"}}',
-    ))
     db.commit()
     db.refresh(song)
 
@@ -795,12 +815,6 @@ async def import_album(
         db.add(song)
         songs_created += 1
 
-    db.add(models.Activity(
-        user_id=current_user.id,
-        action_type="imported_album",
-        target_type="album",
-        meta=f'{{"spotify_id":"{spotify_album_id}"}}',
-    ))
     db.commit()
     db.refresh(album)
 
@@ -941,12 +955,6 @@ async def import_artist(
             ))
         albums_imported += 1
 
-    db.add(models.Activity(
-        user_id=current_user.id,
-        action_type="imported_artist",
-        target_type="artist",
-        meta=f'{{"spotify_id":"{spotify_artist_id}"}}',
-    ))
     db.commit()
 
     return {"artist_id": artist.id, "albums_imported": albums_imported}

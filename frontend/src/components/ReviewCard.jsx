@@ -7,7 +7,7 @@ export default function ReviewCard({ review }) {
     <div className="card p-4 space-y-2">
       <div className="flex items-center justify-between">
         <Link to={`/users/${review.username}`} className="flex items-center gap-2">
-          <Avatar username={review.username} size={7} />
+          <Avatar username={review.username} avatarUrl={review.avatar_url} size={7} />
           <span className="text-sm font-medium text-white hover:text-violet-400 transition-colors">
             {review.username}
           </span>

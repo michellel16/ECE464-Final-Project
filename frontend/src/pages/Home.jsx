@@ -2,22 +2,28 @@ import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import axios from 'axios'
 import { useAuth } from '../contexts/AuthContext'
-import AlbumCard from '../components/AlbumCard'
 import { Avatar } from '../components/Navbar'
-import StarRating from '../components/StarRating'
 
 export default function Home() {
   const { user } = useAuth()
-  const [featured, setFeatured] = useState([])
-  const [feed, setFeed]         = useState([])
-  const [loading, setLoading]   = useState(true)
+  const [albums, setAlbums]   = useState([])
+  const [artists, setArtists] = useState([])
+  const [songs, setSongs]     = useState([])
+  const [feed, setFeed]       = useState([])
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const fetches = [axios.get('/api/music/albums?limit=12')]
+    const fetches = [
+      axios.get('/api/music/albums?limit=6'),
+      axios.get('/api/music/artists?limit=6'),
+      axios.get('/api/music/songs?limit=6'),
+    ]
     if (user) fetches.push(axios.get('/api/social/feed?limit=20'))
 
-    Promise.all(fetches).then(([albumsRes, feedRes]) => {
-      setFeatured(albumsRes.data)
+    Promise.all(fetches).then(([albumsRes, artistsRes, songsRes, feedRes]) => {
+      setAlbums(albumsRes.data)
+      setArtists(artistsRes.data)
+      setSongs(songsRes.data)
       if (feedRes) setFeed(feedRes.data)
     }).finally(() => setLoading(false))
   }, [user])
@@ -26,6 +32,7 @@ export default function Home() {
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8 space-y-14">
+
       {/* Hero for guests */}
       {!user && (
         <section className="relative text-center py-24 rounded-2xl overflow-hidden">
@@ -48,11 +55,27 @@ export default function Home() {
         </section>
       )}
 
-      {/* Featured albums */}
+      {/* Featured Albums */}
       <section>
         <SectionHeader title="Featured Albums" href="/discover" />
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
+          {albums.map(a => <AlbumCard key={a.id} album={a} />)}
+        </div>
+      </section>
+
+      {/* Featured Artists */}
+      <section>
+        <SectionHeader title="Featured Artists" href="/discover" />
         <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-4">
-          {featured.map(a => <AlbumCard key={a.id} album={a} />)}
+          {artists.map(a => <ArtistCard key={a.id} artist={a} />)}
+        </div>
+      </section>
+
+      {/* Featured Songs */}
+      <section>
+        <SectionHeader title="Featured Songs" href="/discover" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {songs.map(s => <SongRow key={s.id} song={s} />)}
         </div>
       </section>
 
@@ -63,9 +86,7 @@ export default function Home() {
           {feed.length === 0 ? (
             <div className="card p-10 text-center text-gray-500">
               <p className="mb-2">Nothing here yet.</p>
-              <p>
-                <Link to="/discover" className="link-purple">Find users to follow →</Link>
-              </p>
+              <p><Link to="/discover" className="link-purple">Find users to follow →</Link></p>
             </div>
           ) : (
             <div className="space-y-3">
@@ -87,14 +108,79 @@ function SectionHeader({ title, href }) {
   )
 }
 
+function AlbumCard({ album }) {
+  return (
+    <Link to={`/albums/${album.id}`} className="group block">
+      <div className="aspect-square bg-gray-800 rounded-xl overflow-hidden mb-2">
+        {album.cover_url ? (
+          <img
+            src={album.cover_url}
+            alt={album.title}
+            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+            loading="lazy"
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center text-4xl bg-gradient-to-br from-violet-900/60 to-gray-800">
+            🎵
+          </div>
+        )}
+      </div>
+      <p className="text-white text-sm font-medium truncate group-hover:text-violet-400 transition-colors">{album.title}</p>
+      <p className="text-gray-500 text-xs truncate">{album.artist?.name}</p>
+    </Link>
+  )
+}
+
+function ArtistCard({ artist }) {
+  return (
+    <Link to={`/artists/${artist.id}`} className="group block text-center">
+      <div className="aspect-square bg-gray-800 rounded-full overflow-hidden mb-2 mx-auto" style={{ maxWidth: '7rem' }}>
+        {artist.image_url ? (
+          <img
+            src={artist.image_url}
+            alt={artist.name}
+            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+            loading="lazy"
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center text-3xl bg-gradient-to-br from-violet-900/60 to-gray-800">
+            🎤
+          </div>
+        )}
+      </div>
+      <p className="text-white text-sm font-medium truncate group-hover:text-violet-400 transition-colors">{artist.name}</p>
+      <p className="text-gray-500 text-xs">{artist.genres?.slice(0, 2).join(', ')}</p>
+    </Link>
+  )
+}
+
+function SongRow({ song }) {
+  return (
+    <Link to={`/songs/${song.id}`} className="card p-3 flex items-center gap-3 hover:border-violet-700 transition-colors group">
+      {song.album?.cover_url ? (
+        <img src={song.album.cover_url} alt="" className="w-10 h-10 rounded object-cover shrink-0" loading="lazy" />
+      ) : (
+        <div className="w-10 h-10 rounded bg-gray-800 flex items-center justify-center text-gray-500 shrink-0">♪</div>
+      )}
+      <div className="min-w-0 flex-1">
+        <p className="text-white text-sm font-medium truncate group-hover:text-violet-400 transition-colors">{song.title}</p>
+        <p className="text-gray-500 text-xs truncate">{song.artist?.name}{song.album ? ` · ${song.album.title}` : ''}</p>
+      </div>
+      {song.average_rating && (
+        <span className="text-yellow-400 text-xs shrink-0">★ {song.average_rating.toFixed(1)}</span>
+      )}
+    </Link>
+  )
+}
+
 function ActivityItem({ item }) {
   const actionLabel = {
-    reviewed_album:          'reviewed',
-    reviewed_song:           'reviewed',
-    marked_album_listened:   'listened to',
+    reviewed_album:              'reviewed',
+    reviewed_song:               'reviewed',
+    marked_album_listened:       'listened to',
     marked_album_want_to_listen: 'wants to listen to',
-    marked_album_favorites:  'favorited',
-    followed:                'followed',
+    marked_album_favorites:      'favorited',
+    followed:                    'followed',
   }[item.action_type] ?? item.action_type
 
   const targetLink = item.target_type === 'album'
@@ -108,7 +194,7 @@ function ActivityItem({ item }) {
   return (
     <div className="card p-4 flex items-start gap-3">
       <Link to={`/users/${item.username}`}>
-        <Avatar username={item.username} size={9} />
+        <Avatar username={item.username} avatarUrl={item.avatar_url} size={9} />
       </Link>
       <div className="flex-1 min-w-0">
         <p className="text-sm">

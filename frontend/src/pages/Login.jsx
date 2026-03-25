@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import axios from 'axios'
 import { useAuth } from '../contexts/AuthContext'
 
 export default function Login() {
@@ -8,6 +9,13 @@ export default function Login() {
   const [form, setForm]   = useState({ username: '', password: '' })
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [demoUsername, setDemoUsername] = useState('musiclover')
+
+  useEffect(() => {
+    axios.get('/api/auth/demo').then(r => {
+      if (r.data.username) setDemoUsername(r.data.username)
+    }).catch(() => {})
+  }, [])
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -73,7 +81,7 @@ export default function Login() {
           <Link to="/register" className="link-purple font-medium">Sign up</Link>
         </p>
         <p className="text-center text-xs text-gray-600">
-          Demo account: <strong className="text-gray-400">musiclover</strong> / <strong className="text-gray-400">password123</strong>
+          Demo account: <strong className="text-gray-400">{demoUsername}</strong> / <strong className="text-gray-400">password123</strong>
         </p>
       </div>
     </div>

@@ -52,3 +52,12 @@ def get_me(current_user: models.User = Depends(get_current_user)):
     current_user.follower_count = len(current_user.followers)
     current_user.following_count = len(current_user.following)
     return current_user
+
+
+@router.get("/demo")
+def get_demo_credentials(db: Session = Depends(get_db)):
+    """Return the current username of the demo account (for the login hint)."""
+    demo = db.query(models.User).filter(models.User.email == "demo@tunelog.com").first()
+    if not demo:
+        return {"username": None}
+    return {"username": demo.username}

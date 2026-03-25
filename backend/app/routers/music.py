@@ -6,6 +6,7 @@ from typing import List
 from .. import models, schemas
 from ..database import get_db
 from ..auth import get_current_user
+from .search import _enrich_missing_images
 
 router = APIRouter(prefix="/api/music", tags=["music"])
 
@@ -41,8 +42,9 @@ def get_genres(db: Session = Depends(get_db)):
 # ── Artists ───────────────────────────────────────────────────────────────────
 
 @router.get("/artists")
-def list_artists(skip: int = 0, limit: int = 50, db: Session = Depends(get_db)):
+async def list_artists(skip: int = 0, limit: int = 50, db: Session = Depends(get_db)):
     artists = db.query(models.Artist).offset(skip).limit(limit).all()
+    await _enrich_missing_images(db, artists, [])
     return [
         {
             "id": a.id, "name": a.name, "bio": a.bio,
@@ -56,10 +58,11 @@ def list_artists(skip: int = 0, limit: int = 50, db: Session = Depends(get_db)):
 
 
 @router.get("/artists/{artist_id}")
-def get_artist(artist_id: int, db: Session = Depends(get_db)):
+async def get_artist(artist_id: int, db: Session = Depends(get_db)):
     a = db.query(models.Artist).filter(models.Artist.id == artist_id).first()
     if not a:
         raise HTTPException(status_code=404, detail="Artist not found")
+    await _enrich_missing_images(db, [a], [])
     return {
         "id": a.id, "name": a.name, "bio": a.bio,
         "image_url": a.image_url, "formed_year": a.formed_year,
@@ -70,10 +73,11 @@ def get_artist(artist_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/artists/{artist_id}/albums")
-def get_artist_albums(artist_id: int, db: Session = Depends(get_db)):
+async def get_artist_albums(artist_id: int, db: Session = Depends(get_db)):
     artist = db.query(models.Artist).filter(models.Artist.id == artist_id).first()
     if not artist:
         raise HTTPException(status_code=404, detail="Artist not found")
+    await _enrich_missing_images(db, [], artist.albums)
     return [
         {
             "id": al.id, "title": al.title, "artist_id": al.artist_id,
@@ -91,8 +95,10 @@ def get_artist_albums(artist_id: int, db: Session = Depends(get_db)):
 # ── Albums ────────────────────────────────────────────────────────────────────
 
 @router.get("/albums")
-def list_albums(skip: int = 0, limit: int = 30, db: Session = Depends(get_db)):
+async def list_albums(skip: int = 0, limit: int = 30, db: Session = Depends(get_db)):
     albums = db.query(models.Album).offset(skip).limit(limit).all()
+    artists = list({al.artist for al in albums if al.artist})
+    await _enrich_missing_images(db, artists, albums)
     return [
         {
             "id": al.id, "title": al.title, "artist_id": al.artist_id,
@@ -108,10 +114,11 @@ def list_albums(skip: int = 0, limit: int = 30, db: Session = Depends(get_db)):
 
 
 @router.get("/albums/{album_id}")
-def get_album(album_id: int, db: Session = Depends(get_db)):
+async def get_album(album_id: int, db: Session = Depends(get_db)):
     al = db.query(models.Album).filter(models.Album.id == album_id).first()
     if not al:
         raise HTTPException(status_code=404, detail="Album not found")
+    await _enrich_missing_images(db, [al.artist] if al.artist else [], [al])
     return {
         "id": al.id, "title": al.title, "artist_id": al.artist_id,
         "artist": {"id": al.artist.id, "name": al.artist.name, "image_url": al.artist.image_url},

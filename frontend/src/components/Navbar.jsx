@@ -137,22 +137,23 @@ export function Avatar({ username, avatarUrl = null, size = 8, className = '' })
     'from-amber-500 to-orange-500',
   ]
   const idx = username ? username.charCodeAt(0) % colors.length : 0
-  const sizeClass = `w-${size} h-${size}`
+  const px = size * 4  // Tailwind spacing: 1 unit = 4px
 
   if (avatarUrl) {
     return (
       <img
         src={avatarUrl}
         alt={username}
-        className={`${sizeClass} rounded-full object-cover shrink-0 ${className}`}
+        style={{ width: px, height: px }}
+        className={`rounded-full object-cover shrink-0 ${className}`}
       />
     )
   }
 
   return (
     <div
-      className={`${sizeClass} bg-gradient-to-br ${colors[idx]} rounded-full flex items-center justify-center text-white font-bold shrink-0 ${className}`}
-      style={{ fontSize: `${size * 0.4}rem` }}
+      style={{ width: px, height: px, fontSize: `${px * 0.42}px` }}
+      className={`bg-gradient-to-br ${colors[idx]} rounded-full flex items-center justify-center text-white font-bold shrink-0 ${className}`}
     >
       {username?.[0]?.toUpperCase() ?? '?'}
     </div>
