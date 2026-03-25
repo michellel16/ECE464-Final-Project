@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import axios from 'axios'
 import { useAuth } from '../contexts/AuthContext'
+import AlbumCard from '../components/AlbumCard'
 import { Avatar } from '../components/Navbar'
 
 export default function Home() {
@@ -14,11 +15,11 @@ export default function Home() {
 
   useEffect(() => {
     const fetches = [
-      axios.get('/api/music/albums?limit=6'),
-      axios.get('/api/music/artists?limit=6'),
+      axios.get('/api/music/albums?limit=12'),
+      axios.get('/api/music/artists?limit=12'),
       axios.get('/api/music/songs?limit=6'),
     ]
-    if (user) fetches.push(axios.get('/api/social/feed?limit=20'))
+    if (user) fetches.push(axios.get('/api/social/feed?limit=15'))
 
     Promise.all(fetches).then(([albumsRes, artistsRes, songsRes, feedRes]) => {
       setAlbums(albumsRes.data)
@@ -35,9 +36,9 @@ export default function Home() {
 
       {/* Hero for guests */}
       {!user && (
-        <section className="relative text-center py-24 rounded-2xl overflow-hidden">
+        <section className="relative text-center py-20 rounded-2xl overflow-hidden">
           <div className="absolute inset-0 bg-gradient-to-br from-violet-900/40 via-gray-950 to-pink-900/20 pointer-events-none" />
-          <div className="relative space-y-6">
+          <div className="relative space-y-5">
             <h1 className="text-5xl sm:text-6xl font-extrabold tracking-tight">
               <span className="bg-gradient-to-r from-violet-400 via-pink-400 to-violet-400 bg-clip-text text-transparent">
                 Your Music Journal
@@ -45,48 +46,47 @@ export default function Home() {
             </h1>
             <p className="text-gray-400 text-xl max-w-2xl mx-auto">
               Rate albums, write reviews, build catalogs, and share your taste with the world.
-              Like Letterboxd — but for music.
             </p>
             <div className="flex items-center justify-center gap-4 pt-2">
               <Link to="/register" className="btn-primary text-base px-8 py-3">Get Started</Link>
-              <Link to="/discover" className="btn-secondary text-base px-8 py-3">Explore Music</Link>
+              <Link to="/login" className="btn-secondary text-base px-8 py-3">Sign in</Link>
             </div>
           </div>
         </section>
       )}
 
-      {/* Featured Albums */}
+      {/* Artists */}
       <section>
-        <SectionHeader title="Featured Albums" href="/discover" />
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
-          {albums.map(a => <AlbumCard key={a.id} album={a} />)}
-        </div>
-      </section>
-
-      {/* Featured Artists */}
-      <section>
-        <SectionHeader title="Featured Artists" href="/discover" />
+        <SectionHeader title="Artists" href="/discover?tab=artists" />
         <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-4">
           {artists.map(a => <ArtistCard key={a.id} artist={a} />)}
         </div>
       </section>
 
-      {/* Featured Songs */}
+      {/* Albums */}
       <section>
-        <SectionHeader title="Featured Songs" href="/discover" />
+        <SectionHeader title="Albums" href="/discover?tab=albums" />
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
+          {albums.map(a => <AlbumCard key={a.id} album={a} />)}
+        </div>
+      </section>
+
+      {/* Songs */}
+      <section>
+        <SectionHeader title="Songs" href="/discover?tab=songs" />
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {songs.map(s => <SongRow key={s.id} song={s} />)}
         </div>
       </section>
 
-      {/* Activity feed for logged-in users */}
+      {/* Activity feed */}
       {user && (
         <section>
-          <SectionHeader title="Activity Feed" />
+          <h2 className="text-xl font-bold text-white mb-5">Activity Feed</h2>
           {feed.length === 0 ? (
             <div className="card p-10 text-center text-gray-500">
               <p className="mb-2">Nothing here yet.</p>
-              <p><Link to="/discover" className="link-purple">Find users to follow →</Link></p>
+              <p><Link to="/search" className="link-purple">Find users to follow →</Link></p>
             </div>
           ) : (
             <div className="space-y-3">
@@ -103,53 +103,23 @@ function SectionHeader({ title, href }) {
   return (
     <div className="flex items-center justify-between mb-5">
       <h2 className="text-xl font-bold text-white">{title}</h2>
-      {href && <Link to={href} className="link-purple text-sm">View all →</Link>}
+      {href && <Link to={href} className="text-sm text-violet-400 hover:text-violet-300 transition-colors">See more →</Link>}
     </div>
-  )
-}
-
-function AlbumCard({ album }) {
-  return (
-    <Link to={`/albums/${album.id}`} className="group block">
-      <div className="aspect-square bg-gray-800 rounded-xl overflow-hidden mb-2">
-        {album.cover_url ? (
-          <img
-            src={album.cover_url}
-            alt={album.title}
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-            loading="lazy"
-          />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center text-4xl bg-gradient-to-br from-violet-900/60 to-gray-800">
-            🎵
-          </div>
-        )}
-      </div>
-      <p className="text-white text-sm font-medium truncate group-hover:text-violet-400 transition-colors">{album.title}</p>
-      <p className="text-gray-500 text-xs truncate">{album.artist?.name}</p>
-    </Link>
   )
 }
 
 function ArtistCard({ artist }) {
   return (
     <Link to={`/artists/${artist.id}`} className="group block text-center">
-      <div className="aspect-square bg-gray-800 rounded-full overflow-hidden mb-2 mx-auto" style={{ maxWidth: '7rem' }}>
+      <div className="aspect-square bg-gray-800 rounded-full overflow-hidden mb-3 mx-auto w-28 sm:w-36">
         {artist.image_url ? (
-          <img
-            src={artist.image_url}
-            alt={artist.name}
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-            loading="lazy"
-          />
+          <img src={artist.image_url} alt={artist.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" loading="lazy" />
         ) : (
-          <div className="w-full h-full flex items-center justify-center text-3xl bg-gradient-to-br from-violet-900/60 to-gray-800">
-            🎤
-          </div>
+          <div className="w-full h-full flex items-center justify-center text-4xl bg-gradient-to-br from-violet-900/60 to-gray-800">🎤</div>
         )}
       </div>
-      <p className="text-white text-sm font-medium truncate group-hover:text-violet-400 transition-colors">{artist.name}</p>
-      <p className="text-gray-500 text-xs">{artist.genres?.slice(0, 2).join(', ')}</p>
+      <p className="text-white font-medium text-sm group-hover:text-violet-400 transition-colors">{artist.name}</p>
+      <p className="text-gray-500 text-xs mt-0.5">{artist.genres?.slice(0, 2).join(', ')}</p>
     </Link>
   )
 }
@@ -183,12 +153,9 @@ function ActivityItem({ item }) {
     followed:                    'followed',
   }[item.action_type] ?? item.action_type
 
-  const targetLink = item.target_type === 'album'
-    ? `/albums/${item.target_id}`
-    : item.target_type === 'song'
-    ? `/songs/${item.target_id}`
-    : item.target_type === 'user'
-    ? `/users/${item.target_name}`
+  const targetLink = item.target_type === 'album' ? `/albums/${item.target_id}`
+    : item.target_type === 'song'  ? `/songs/${item.target_id}`
+    : item.target_type === 'user'  ? `/users/${item.target_name}`
     : null
 
   return (
@@ -198,30 +165,17 @@ function ActivityItem({ item }) {
       </Link>
       <div className="flex-1 min-w-0">
         <p className="text-sm">
-          <Link to={`/users/${item.username}`} className="font-medium text-white hover:text-violet-400">
-            {item.username}
-          </Link>
-          {' '}
-          <span className="text-gray-400">{actionLabel}</span>
+          <Link to={`/users/${item.username}`} className="font-medium text-white hover:text-violet-400">{item.username}</Link>
+          {' '}<span className="text-gray-400">{actionLabel}</span>
           {item.target_name && (
-            <>
-              {' '}
-              {targetLink ? (
-                <Link to={targetLink} className="font-medium text-white hover:text-violet-400">
-                  {item.target_name}
-                </Link>
-              ) : (
-                <span className="font-medium text-white">{item.target_name}</span>
-              )}
-              {item.target_artist && (
-                <span className="text-gray-500"> by {item.target_artist}</span>
-              )}
+            <>{' '}{targetLink
+              ? <Link to={targetLink} className="font-medium text-white hover:text-violet-400">{item.target_name}</Link>
+              : <span className="font-medium text-white">{item.target_name}</span>}
+              {item.target_artist && <span className="text-gray-500"> by {item.target_artist}</span>}
             </>
           )}
         </p>
-        <p className="text-gray-600 text-xs mt-0.5">
-          {new Date(item.created_at).toLocaleDateString()}
-        </p>
+        <p className="text-gray-600 text-xs mt-0.5">{new Date(item.created_at).toLocaleDateString()}</p>
       </div>
       {item.target_cover && (
         <Link to={targetLink ?? '#'}>
