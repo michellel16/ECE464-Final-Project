@@ -8,7 +8,8 @@
       "Bash(/c/Users/miche/AppData/Roaming/Python/Scripts/uv.exe sync:*)",
       "Bash(uv run:*)",
       "Bash(psql:*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(npm install:*)"
     ]
   }
 }

@@ -1,31 +1,23 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import axios from 'axios'
 import { useAuth } from '../contexts/AuthContext'
 
 export default function Login() {
   const { login } = useAuth()
   const navigate = useNavigate()
-  const [form, setForm]   = useState({ username: '', password: '' })
+  const [form, setForm]   = useState({ email: '', password: '' })
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
-  const [demoUsername, setDemoUsername] = useState('musiclover')
-
-  useEffect(() => {
-    axios.get('/api/auth/demo').then(r => {
-      if (r.data.username) setDemoUsername(r.data.username)
-    }).catch(() => {})
-  }, [])
 
   async function handleSubmit(e) {
     e.preventDefault()
     setError('')
     setLoading(true)
     try {
-      await login(form.username, form.password)
+      await login(form.email, form.password)
       navigate('/')
     } catch (err) {
-      setError(err.response?.data?.detail ?? 'Login failed')
+      setError(err.response?.data?.detail ?? err.message ?? 'Login failed')
     } finally {
       setLoading(false)
     }
@@ -47,12 +39,13 @@ export default function Login() {
             </div>
           )}
           <div>
-            <label className="block text-sm text-gray-400 mb-1.5">Username</label>
+            <label className="block text-sm text-gray-400 mb-1.5">Email</label>
             <input
+              type="email"
               className="input"
-              placeholder="your_username"
-              value={form.username}
-              onChange={e => setForm({ ...form, username: e.target.value })}
+              placeholder="you@example.com"
+              value={form.email}
+              onChange={e => setForm({ ...form, email: e.target.value })}
               required
             />
           </div>
@@ -79,9 +72,6 @@ export default function Login() {
         <p className="text-center text-sm text-gray-500">
           Don't have an account?{' '}
           <Link to="/register" className="link-purple font-medium">Sign up</Link>
-        </p>
-        <p className="text-center text-xs text-gray-600">
-          Demo account: <strong className="text-gray-400">{demoUsername}</strong> / <strong className="text-gray-400">password123</strong>
         </p>
       </div>
     </div>

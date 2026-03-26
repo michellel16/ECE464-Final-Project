@@ -16,6 +16,7 @@ export default function SongPage() {
   const [showForm, setShowForm] = useState(false)
   const [saving, setSaving]     = useState(false)
   const [loading, setLoading]   = useState(true)
+  const [showListModal, setShowListModal] = useState(false)
 
   useEffect(() => {
     const fetches = [
@@ -183,6 +184,12 @@ export default function SongPage() {
             </button>
           ))}
           <button
+            onClick={() => setShowListModal(true)}
+            className="px-4 py-1.5 rounded-full text-sm font-medium border border-gray-700 text-gray-400 hover:border-violet-600 hover:text-violet-400 transition-colors"
+          >
+            + Add to List
+          </button>
+          <button
             onClick={() => setShowForm(!showForm)}
             className="px-4 py-1.5 rounded-full text-sm font-medium border border-pink-700 text-pink-400 hover:bg-pink-700/20 transition-colors"
           >
@@ -225,6 +232,10 @@ export default function SongPage() {
           {reviews.map(r => <ReviewCard key={r.id} review={r} />)}
         </div>
       )}
+
+      {showListModal && (
+        <AddToListModal songId={Number(id)} onClose={() => setShowListModal(false)} />
+      )}
     </div>
   )
 }
@@ -258,6 +269,105 @@ function SpotifyIcon({ className = '' }) {
 function formatDuration(sec) {
   if (!sec) return ''
   return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`
+}
+
+function AddToListModal({ songId, onClose }) {
+  const [lists, setLists]         = useState([])
+  const [creating, setCreating]   = useState(false)
+  const [newName, setNewName]     = useState('')
+  const [feedback, setFeedback]   = useState('')
+  const [saving, setSaving]       = useState(false)
+
+  useEffect(() => {
+    axios.get('/api/lists/me').then(r => setLists(r.data)).catch(() => {})
+  }, [])
+
+  async function addToList(listId) {
+    setSaving(true)
+    try {
+      await axios.post(`/api/lists/${listId}/items`, { song_id: songId })
+      setFeedback('Added!')
+      setTimeout(onClose, 800)
+    } catch (err) {
+      setFeedback(err.response?.data?.detail ?? 'Failed to add')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function createAndAdd(e) {
+    e.preventDefault()
+    if (!newName.trim()) return
+    setSaving(true)
+    try {
+      const res = await axios.post('/api/lists/', { name: newName.trim(), list_type: 'custom', is_public: true })
+      await axios.post(`/api/lists/${res.data.id}/items`, { song_id: songId })
+      setFeedback('Created and added!')
+      setTimeout(onClose, 800)
+    } catch (err) {
+      setFeedback(err.response?.data?.detail ?? 'Failed')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 px-4" onClick={onClose}>
+      <div className="card w-full max-w-sm p-5 space-y-4" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold text-white">Add to List</h3>
+          <button onClick={onClose} className="text-gray-500 hover:text-white text-xl leading-none">×</button>
+        </div>
+
+        {feedback ? (
+          <p className="text-center text-violet-400 py-2">{feedback}</p>
+        ) : (
+          <>
+            {lists.length > 0 && (
+              <div className="space-y-1 max-h-48 overflow-y-auto">
+                {lists.map(l => (
+                  <button
+                    key={l.id}
+                    disabled={saving}
+                    onClick={() => addToList(l.id)}
+                    className="w-full text-left px-3 py-2 rounded-lg text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors"
+                  >
+                    {l.name}
+                    <span className="text-gray-600 ml-2 text-xs">{l.item_count} items</span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <div className="border-t border-gray-800 pt-3">
+              {creating ? (
+                <form onSubmit={createAndAdd} className="flex gap-2">
+                  <input
+                    autoFocus
+                    className="input flex-1 text-sm py-1.5"
+                    placeholder="New list name"
+                    value={newName}
+                    onChange={e => setNewName(e.target.value)}
+                    required
+                  />
+                  <button type="submit" disabled={saving} className="btn-primary text-sm py-1.5 px-3 disabled:opacity-60">
+                    Create
+                  </button>
+                </form>
+              ) : (
+                <button
+                  onClick={() => setCreating(true)}
+                  className="w-full text-left px-3 py-2 rounded-lg text-sm text-violet-400 hover:bg-gray-800 transition-colors"
+                >
+                  + Create new list
+                </button>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
 }
 
 function Loader() {

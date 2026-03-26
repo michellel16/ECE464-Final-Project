@@ -96,9 +96,10 @@ class Song(Base):
 class User(Base):
     __tablename__ = "users"
     id              = Column(Integer, primary_key=True, index=True)
+    supabase_id     = Column(String(36),  unique=True, index=True, nullable=True)
     username        = Column(String(50),  unique=True, index=True, nullable=False)
     email           = Column(String(100), unique=True, index=True, nullable=False)
-    hashed_password = Column(String, nullable=False)
+    hashed_password = Column(String, nullable=True)
     bio             = Column(Text,   nullable=True)
     avatar_url      = Column(String, nullable=True)
     created_at      = Column(DateTime, default=datetime.utcnow)

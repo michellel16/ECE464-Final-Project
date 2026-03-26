@@ -26,10 +26,10 @@ export default function StarRating({ value, onChange, readonly = false, size = '
               const pct  = (e.clientX - rect.left) / rect.width
               setHovered(pct < 0.5 ? star - 0.5 : star)
             }}
-            onClick={() => {
+            onClick={e => {
               if (readonly || !onChange) return
-              const rect = event.currentTarget.getBoundingClientRect()
-              const pct  = (event.clientX - rect.left) / rect.width
+              const rect = e.currentTarget.getBoundingClientRect()
+              const pct  = (e.clientX - rect.left) / rect.width
               const val  = pct < 0.5 ? star - 0.5 : star
               onChange(val === value ? 0 : val)
             }}

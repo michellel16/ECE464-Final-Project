@@ -358,3 +358,10 @@ def set_song_status(
         db.add(models.UserSongStatus(user_id=current_user.id, song_id=song_id, status=new_status))
     db.commit()
     return {"status": new_status}
+
+
+@router.delete("/songs/{song_id}/status")
+def remove_song_status(song_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    db.query(models.UserSongStatus).filter_by(user_id=current_user.id, song_id=song_id).delete()
+    db.commit()
+    return {"status": None}
