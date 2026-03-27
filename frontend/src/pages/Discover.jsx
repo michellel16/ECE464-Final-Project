@@ -78,7 +78,6 @@ function ArtistCard({ artist }) {
         )}
       </div>
       <p className="text-white font-medium text-sm group-hover:text-violet-400 transition-colors">{artist.name}</p>
-      <p className="text-gray-500 text-xs mt-0.5">{artist.genres?.slice(0, 2).join(', ')}</p>
     </Link>
   )
 }

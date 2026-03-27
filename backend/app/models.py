@@ -4,6 +4,7 @@ from sqlalchemy import (
     DateTime, ForeignKey, Table
 )
 from sqlalchemy.orm import relationship
+from pgvector.sqlalchemy import Vector
 from .database import Base
 
 # ── Association tables ──────────────────────────────────────────────────────
@@ -41,6 +42,7 @@ class Artist(Base):
     formed_year = Column(Integer,     nullable=True)
     country     = Column(String(50),  nullable=True)
     spotify_id  = Column(String(100), nullable=True, index=True)
+    embedding   = Column(Vector(1536), nullable=True)
 
     genres  = relationship("Genre",  secondary=artist_genre, back_populates="artists")
     albums  = relationship("Album",  back_populates="artist")
@@ -56,6 +58,7 @@ class Album(Base):
     cover_url    = Column(String,     nullable=True)
     description  = Column(Text,       nullable=True)
     spotify_id   = Column(String(100), nullable=True, index=True)
+    embedding    = Column(Vector(1536), nullable=True)
 
     artist        = relationship("Artist",          back_populates="albums")
     genres        = relationship("Genre",           secondary=album_genre, back_populates="albums")
@@ -83,6 +86,7 @@ class Song(Base):
     tempo               = Column(Float, nullable=True)
     acousticness        = Column(Float, nullable=True)
     instrumentalness    = Column(Float, nullable=True)
+    embedding           = Column(Vector(1536), nullable=True)
 
     artist        = relationship("Artist",         back_populates="songs")
     album         = relationship("Album",          back_populates="songs")

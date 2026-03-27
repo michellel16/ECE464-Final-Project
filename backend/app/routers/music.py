@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Body
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List
@@ -205,6 +205,7 @@ def get_album_reviews(album_id: int, skip: int = 0, limit: int = 20, db: Session
 def create_album_review(
     album_id: int,
     review: schemas.ReviewCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
@@ -217,6 +218,8 @@ def create_album_review(
         existing.rating = review.rating
         db.commit()
         db.refresh(existing)
+        from ..embeddings import reembed_album_bg
+        background_tasks.add_task(reembed_album_bg, album_id)
         return _review_row(existing)
 
     r = models.Review(user_id=current_user.id, album_id=album_id, text=review.text, rating=review.rating)
@@ -228,6 +231,8 @@ def create_album_review(
     ))
     db.commit()
     db.refresh(r)
+    from ..embeddings import reembed_album_bg
+    background_tasks.add_task(reembed_album_bg, album_id)
     return _review_row(r)
 
 
@@ -246,6 +251,7 @@ def get_song_reviews(song_id: int, skip: int = 0, limit: int = 20, db: Session =
 def create_song_review(
     song_id: int,
     review: schemas.ReviewCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
@@ -258,6 +264,8 @@ def create_song_review(
         existing.rating = review.rating
         db.commit()
         db.refresh(existing)
+        from ..embeddings import reembed_song_bg
+        background_tasks.add_task(reembed_song_bg, song_id)
         return _review_row(existing)
 
     r = models.Review(user_id=current_user.id, song_id=song_id, text=review.text, rating=review.rating)
@@ -269,6 +277,8 @@ def create_song_review(
     ))
     db.commit()
     db.refresh(r)
+    from ..embeddings import reembed_song_bg
+    background_tasks.add_task(reembed_song_bg, song_id)
     return _review_row(r)
 
 

@@ -1,3 +1,4 @@
+import asyncio
 import os
 from datetime import datetime, timedelta
 from urllib.parse import urlencode
@@ -490,6 +491,13 @@ async def import_track(
     db.commit()
     db.refresh(song)
 
+    # Fire-and-forget: embed the new song (and its artist/album) in the background
+    from ..embeddings import reembed_song_bg, reembed_artist_bg, reembed_album_bg
+    asyncio.create_task(reembed_song_bg(song.id))
+    asyncio.create_task(reembed_artist_bg(artist.id))
+    if album:
+        asyncio.create_task(reembed_album_bg(album.id))
+
     return {"song_id": song.id, "already_existed": False}
 
 
@@ -818,6 +826,14 @@ async def import_album(
     db.commit()
     db.refresh(album)
 
+    # Fire-and-forget: embed the album, artist, and all its songs in the background
+    from ..embeddings import reembed_album_bg, reembed_artist_bg, reembed_song_bg
+    asyncio.create_task(reembed_artist_bg(artist.id))
+    asyncio.create_task(reembed_album_bg(album.id))
+    song_ids = [s.id for s in db.query(models.Song.id).filter(models.Song.album_id == album.id).all()]
+    for sid in song_ids:
+        asyncio.create_task(reembed_song_bg(sid))
+
     return {
         "album_id":        album.id,
         "song_count":      songs_created,
@@ -956,5 +972,15 @@ async def import_artist(
         albums_imported += 1
 
     db.commit()
+
+    # Fire-and-forget: embed the artist and all imported content in the background
+    from ..embeddings import reembed_artist_bg, reembed_album_bg, reembed_song_bg
+    asyncio.create_task(reembed_artist_bg(artist.id))
+    album_ids = [a.id for a in db.query(models.Album.id).filter(models.Album.artist_id == artist.id).all()]
+    for aid in album_ids:
+        asyncio.create_task(reembed_album_bg(aid))
+    song_ids = [s.id for s in db.query(models.Song.id).filter(models.Song.artist_id == artist.id).all()]
+    for sid in song_ids:
+        asyncio.create_task(reembed_song_bg(sid))
 
     return {"artist_id": artist.id, "albums_imported": albums_imported}

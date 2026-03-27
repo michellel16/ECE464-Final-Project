@@ -1,8 +1,10 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { useSearchParams, Link, useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import { useAuth } from '../contexts/AuthContext'
 import { Avatar } from '../components/Navbar'
+
+const TABS = ['All', 'Artists', 'Albums', 'Songs', 'Users']
 
 export default function Search() {
   const [params] = useSearchParams()
@@ -10,21 +12,34 @@ export default function Search() {
   const { user } = useAuth()
   const navigate = useNavigate()
 
-  const [localResults, setLocalResults]   = useState(null)
+  const [tab, setTab] = useState('All')
+
+  const [localResults, setLocalResults]     = useState(null)
   const [spotifyResults, setSpotifyResults] = useState(null)
-  const [localLoading, setLocalLoading]   = useState(false)
+  const [localLoading, setLocalLoading]     = useState(false)
   const [spotifyLoading, setSpotifyLoading] = useState(false)
-  const [importing, setImporting]         = useState({})  // { spotifyId: true/false }
-  const [spotifyError, setSpotifyError]   = useState(null)
+  const [spotifyError, setSpotifyError]     = useState(null)
+  const [importing, setImporting]           = useState({})
+
+  const [vibeResults, setVibeResults] = useState(null)
+
+  // Reset tab when query changes
+  useEffect(() => { setTab('All') }, [q])
 
   useEffect(() => {
-    if (!q) { setLocalResults(null); setSpotifyResults(null); return }
+    if (!q) {
+      setLocalResults(null)
+      setSpotifyResults(null)
+      setVibeResults(null)
+      return
+    }
 
     setLocalLoading(true)
     setSpotifyLoading(true)
     setLocalResults(null)
     setSpotifyResults(null)
     setSpotifyError(null)
+    setVibeResults(null)
 
     axios.get(`/api/search/?q=${encodeURIComponent(q)}`)
       .then(r => setLocalResults(r.data))
@@ -33,11 +48,14 @@ export default function Search() {
     axios.get(`/api/spotify/search?q=${encodeURIComponent(q)}`)
       .then(r => setSpotifyResults(r.data))
       .catch(err => {
-        const msg = err.response?.data?.detail ?? err.message ?? 'Unknown error'
-        setSpotifyError(msg)
+        setSpotifyError(err.response?.data?.detail ?? err.message ?? 'Unknown error')
         setSpotifyResults(null)
       })
       .finally(() => setSpotifyLoading(false))
+
+    axios.get(`/api/search/semantic?q=${encodeURIComponent(q)}`)
+      .then(r => setVibeResults(r.data))
+      .catch(() => setVibeResults(null))
   }, [q])
 
   async function importAlbum(spotifyAlbumId) {
@@ -87,22 +105,50 @@ export default function Search() {
     spotifyResults.tracks.length + spotifyResults.albums.length + spotifyResults.artists.length > 0
   )
 
+  const exactArtistIds = new Set(localResults?.artists.map(a => a.id) ?? [])
+  const exactAlbumIds  = new Set(localResults?.albums.map(a => a.id) ?? [])
+  const exactSongIds   = new Set(localResults?.songs.map(s => s.id) ?? [])
+
+  const vibeArtists = vibeResults?.artists.filter(a => !exactArtistIds.has(a.id)) ?? []
+  const vibeAlbums  = vibeResults?.albums.filter(a => !exactAlbumIds.has(a.id)) ?? []
+  const vibeSongs   = vibeResults?.songs.filter(s => !exactSongIds.has(s.id)) ?? []
+  const hasVibe     = vibeArtists.length + vibeAlbums.length + vibeSongs.length > 0
+
+  const showArtists = tab === 'All' || tab === 'Artists'
+  const showAlbums  = tab === 'All' || tab === 'Albums'
+  const showSongs   = tab === 'All' || tab === 'Songs'
+  const showUsers   = tab === 'All' || tab === 'Users'
+
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8 space-y-10">
+    <div className="max-w-4xl mx-auto px-4 py-8 space-y-6">
       <h1 className="text-2xl font-bold text-white">
         Results for <span className="text-violet-400">"{q}"</span>
       </h1>
 
-      {/* ── Local Tunelog results ── */}
+      {/* ── Tabs ── */}
+      <div className="flex gap-1 border-b border-gray-800">
+        {TABS.map(t => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${
+              tab === t
+                ? 'border-violet-500 text-violet-400'
+                : 'border-transparent text-gray-500 hover:text-gray-300'
+            }`}
+          >
+            {t}
+          </button>
+        ))}
+      </div>
+
       {localLoading && <Loader />}
 
       {!localLoading && localResults && (
         <div className="space-y-8">
-          {localTotal > 0 && (
-            <p className="text-gray-500 text-sm -mb-4">{localTotal} result{localTotal !== 1 ? 's' : ''} in Tunelog</p>
-          )}
 
-          {localResults.artists.length > 0 && (
+          {/* Artists */}
+          {showArtists && localResults.artists.length > 0 && (
             <Section title="Artists">
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                 {localResults.artists.map(a => (
@@ -120,7 +166,8 @@ export default function Search() {
             </Section>
           )}
 
-          {localResults.albums.length > 0 && (
+          {/* Albums */}
+          {showAlbums && localResults.albums.length > 0 && (
             <Section title="Albums">
               <div className="space-y-2">
                 {localResults.albums.map(a => (
@@ -140,7 +187,8 @@ export default function Search() {
             </Section>
           )}
 
-          {localResults.songs.length > 0 && (
+          {/* Songs */}
+          {showSongs && localResults.songs.length > 0 && (
             <Section title="Songs">
               <div className="space-y-2">
                 {localResults.songs.map(s => (
@@ -160,7 +208,8 @@ export default function Search() {
             </Section>
           )}
 
-          {localResults.users.length > 0 && (
+          {/* Users */}
+          {showUsers && localResults.users.length > 0 && (
             <Section title="Users">
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 {localResults.users.map(u => (
@@ -176,145 +225,243 @@ export default function Search() {
             </Section>
           )}
 
-          {localTotal === 0 && !spotifyLoading && (
+          {/* Empty state for filtered tab */}
+          {localTotal > 0 && (
+            (tab === 'Artists' && localResults.artists.length === 0) ||
+            (tab === 'Albums'  && localResults.albums.length === 0)  ||
+            (tab === 'Songs'   && localResults.songs.length === 0)   ||
+            (tab === 'Users'   && localResults.users.length === 0)
+          ) && (
+            <p className="text-gray-500 text-sm">No {tab.toLowerCase()} found for "{q}".</p>
+          )}
+
+          {localTotal === 0 && !spotifyLoading && tab !== 'Users' && (
             <p className="text-gray-500 text-sm">No Tunelog results — see Spotify results below.</p>
           )}
-        </div>
-      )}
 
-      {/* ── Divider ── */}
-      {(hasSpotify || spotifyLoading || spotifyError) && (
-        <div className="flex items-center gap-3">
-          <div className="flex-1 h-px bg-gray-800" />
-          <span className="flex items-center gap-1.5 text-xs text-gray-500 font-medium">
-            <SpotifyIcon className="text-green-500 w-3.5 h-3.5" /> Spotify Catalog
-          </span>
-          <div className="flex-1 h-px bg-gray-800" />
-        </div>
-      )}
-
-      {spotifyError && (
-        <div className="card p-4 border-red-900/50 text-sm">
-          <p className="text-red-400 font-medium">Spotify search unavailable</p>
-          <p className="text-gray-500 mt-0.5">{spotifyError}</p>
-        </div>
-      )}
-
-      {/* ── Spotify results ── */}
-      {spotifyLoading && (
-        <div className="flex items-center gap-2 text-gray-500 text-sm">
-          <div className="w-4 h-4 border-2 border-green-500 border-t-transparent rounded-full animate-spin" />
-          Searching Spotify…
-        </div>
-      )}
-
-      {!spotifyLoading && hasSpotify && (
-        <div className="space-y-8">
-          {spotifyResults.artists.length > 0 && (
-            <Section title="Artists on Spotify">
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                {spotifyResults.artists.map(a => (
-                  <div key={a.spotify_id} className="card p-4 flex flex-col items-center gap-2">
-                    {a.image_url ? (
-                      <img src={a.image_url} alt={a.name} className="w-20 h-20 rounded-full object-cover" loading="lazy" />
-                    ) : (
-                      <div className="w-20 h-20 rounded-full bg-gradient-to-br from-green-900/40 to-gray-800 flex items-center justify-center text-3xl">🎤</div>
-                    )}
-                    <p className="text-white font-medium text-sm text-center">{a.name}</p>
-                    {a.genres.length > 0 && (
-                      <p className="text-gray-500 text-xs text-center">{a.genres.slice(0, 2).join(', ')}</p>
-                    )}
-                    {a.tunelog_artist_id ? (
-                      <Link to={`/artists/${a.tunelog_artist_id}`} className="text-xs text-violet-400 hover:text-violet-300 transition-colors font-medium">
-                        View in Tunelog →
-                      </Link>
-                    ) : (
-                      <button
-                        onClick={() => importArtist(a.spotify_id)}
-                        disabled={!!importing[a.spotify_id]}
-                        className="text-xs px-3 py-1 rounded-full bg-green-700/30 text-green-400 border border-green-700/50 hover:bg-green-700/50 disabled:opacity-50 transition-colors font-medium"
-                      >
-                        {importing[a.spotify_id] ? 'Importing…' : '+ Import'}
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </Section>
-          )}
-
-          {spotifyResults.albums.length > 0 && (
-            <Section title="Albums on Spotify">
-              <div className="space-y-2">
-                {spotifyResults.albums.map(a => (
-                  <div key={a.spotify_id} className="card p-3 flex items-center gap-4">
-                    {a.cover_url ? (
-                      <img src={a.cover_url} alt={a.name} className="w-12 h-12 rounded object-cover shrink-0" loading="lazy" />
-                    ) : (
-                      <div className="w-12 h-12 rounded bg-gray-800 flex items-center justify-center text-xl shrink-0">🎵</div>
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <p className="text-white font-medium truncate">{a.name}</p>
-                      <p className="text-gray-500 text-sm">{a.artist_name} · {a.release_date} · {a.track_count} tracks</p>
-                    </div>
-                    {a.tunelog_album_id ? (
-                      <Link to={`/albums/${a.tunelog_album_id}`} className="text-xs text-violet-400 hover:text-violet-300 transition-colors font-medium shrink-0">
-                        View →
-                      </Link>
-                    ) : (
-                      <button
-                        onClick={() => importAlbum(a.spotify_id)}
-                        disabled={!!importing[a.spotify_id]}
-                        className="text-xs px-3 py-1.5 rounded-full bg-green-700/30 text-green-400 border border-green-700/50 hover:bg-green-700/50 disabled:opacity-50 transition-colors font-medium shrink-0"
-                      >
-                        {importing[a.spotify_id] ? 'Importing…' : '+ Import'}
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </Section>
-          )}
-
-          {spotifyResults.tracks.length > 0 && (
-            <Section title="Tracks on Spotify">
-              <div className="space-y-2">
-                {spotifyResults.tracks.map(t => (
-                  <div key={t.spotify_id} className="card p-3 flex items-center gap-4">
-                    {t.cover_url ? (
-                      <img src={t.cover_url} alt="" className="w-10 h-10 rounded object-cover shrink-0" loading="lazy" />
-                    ) : (
-                      <div className="w-10 h-10 rounded bg-gray-800 flex items-center justify-center shrink-0 text-gray-600">♪</div>
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <p className="text-white font-medium truncate">{t.name}</p>
-                      <p className="text-gray-500 text-sm truncate">{t.artist_name}{t.album_name ? ` · ${t.album_name}` : ''}</p>
-                    </div>
-                    {t.tunelog_song_id ? (
-                      <Link to={`/songs/${t.tunelog_song_id}`} className="text-xs text-violet-400 hover:text-violet-300 transition-colors font-medium shrink-0">
-                        View →
-                      </Link>
-                    ) : (
-                      <button
-                        onClick={() => importTrack(t.spotify_id)}
-                        disabled={!!importing[t.spotify_id]}
-                        className="text-xs px-3 py-1.5 rounded-full bg-green-700/30 text-green-400 border border-green-700/50 hover:bg-green-700/50 disabled:opacity-50 transition-colors font-medium shrink-0"
-                      >
-                        {importing[t.spotify_id] ? 'Importing…' : '+ Import'}
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </Section>
+          {localTotal === 0 && tab === 'Users' && (
+            <p className="text-gray-500 text-sm">No users found for "{q}".</p>
           )}
         </div>
       )}
 
-      {!spotifyLoading && spotifyResults !== null && !hasSpotify && localTotal === 0 && (
+      {/* ── Semantic recommendations (All tab only) ── */}
+      {tab === 'All' && hasVibe && (
+        <>
+          <div className="flex items-center gap-3">
+            <div className="flex-1 h-px bg-gray-800" />
+            <span className="flex items-center gap-1.5 text-xs text-gray-500 font-medium">
+              <SparkleIcon className="w-3 h-3 text-violet-400" />
+              Recommended based on your search
+            </span>
+            <div className="flex-1 h-px bg-gray-800" />
+          </div>
+
+          <div className="space-y-8">
+            {vibeArtists.length > 0 && (
+              <Section title="Artists">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                  {vibeArtists.map(a => (
+                    <Link key={a.id} to={`/artists/${a.id}`} className="group card p-4 flex flex-col items-center gap-2 hover:border-violet-700 transition-colors">
+                      {a.image_url ? (
+                        <img src={a.image_url} alt={a.name} className="w-20 h-20 rounded-full object-cover" loading="lazy" />
+                      ) : (
+                        <div className="w-20 h-20 rounded-full bg-gradient-to-br from-violet-900 to-gray-800 flex items-center justify-center text-3xl">🎤</div>
+                      )}
+                      <p className="text-white font-medium text-sm text-center group-hover:text-violet-400 transition-colors">{a.name}</p>
+                    </Link>
+                  ))}
+                </div>
+              </Section>
+            )}
+
+            {vibeAlbums.length > 0 && (
+              <Section title="Albums">
+                <div className="space-y-2">
+                  {vibeAlbums.map(a => (
+                    <Link key={a.id} to={`/albums/${a.id}`} className="card p-3 flex items-center gap-4 hover:border-violet-700 transition-colors group">
+                      {a.cover_url ? (
+                        <img src={a.cover_url} alt={a.title} className="w-12 h-12 rounded object-cover shrink-0" loading="lazy" />
+                      ) : (
+                        <div className="w-12 h-12 rounded bg-gray-800 flex items-center justify-center text-xl shrink-0">🎵</div>
+                      )}
+                      <div className="min-w-0">
+                        <p className="text-white font-medium group-hover:text-violet-400 transition-colors truncate">{a.title}</p>
+                        <p className="text-gray-500 text-sm">{a.artist?.name} · {a.release_date?.slice(0, 4)}</p>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              </Section>
+            )}
+
+            {vibeSongs.length > 0 && (
+              <Section title="Songs">
+                <div className="space-y-2">
+                  {vibeSongs.map(s => (
+                    <Link key={s.id} to={`/songs/${s.id}`} className="card p-3 flex items-center gap-4 hover:border-violet-700 transition-colors group">
+                      {s.album?.cover_url ? (
+                        <img src={s.album.cover_url} alt="" className="w-10 h-10 rounded object-cover shrink-0" loading="lazy" />
+                      ) : (
+                        <div className="w-10 h-10 rounded bg-gray-800 flex items-center justify-center shrink-0">♪</div>
+                      )}
+                      <div className="min-w-0">
+                        <p className="text-white font-medium group-hover:text-violet-400 transition-colors truncate">{s.title}</p>
+                        <p className="text-gray-500 text-sm">{s.artist?.name}{s.album ? ` · ${s.album.title}` : ''}</p>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              </Section>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* ── Spotify section (All + Artists/Albums/Songs tabs, not Users) ── */}
+      {tab !== 'Users' && (
+        <>
+          {(hasSpotify || spotifyLoading || spotifyError) && (
+            <div className="flex items-center gap-3">
+              <div className="flex-1 h-px bg-gray-800" />
+              <span className="flex items-center gap-1.5 text-xs text-gray-500 font-medium">
+                <SpotifyIcon className="text-green-500 w-3.5 h-3.5" /> Spotify Catalog
+              </span>
+              <div className="flex-1 h-px bg-gray-800" />
+            </div>
+          )}
+
+          {spotifyError && (
+            <div className="card p-4 border-red-900/50 text-sm">
+              <p className="text-red-400 font-medium">Spotify search unavailable</p>
+              <p className="text-gray-500 mt-0.5">{spotifyError}</p>
+            </div>
+          )}
+
+          {spotifyLoading && (
+            <div className="flex items-center gap-2 text-gray-500 text-sm">
+              <div className="w-4 h-4 border-2 border-green-500 border-t-transparent rounded-full animate-spin" />
+              Searching Spotify…
+            </div>
+          )}
+
+          {!spotifyLoading && hasSpotify && (
+            <div className="space-y-8">
+              {(tab === 'All' || tab === 'Artists') && spotifyResults.artists.length > 0 && (
+                <Section title="Artists on Spotify">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                    {spotifyResults.artists.map(a => (
+                      <div key={a.spotify_id} className="card p-4 flex flex-col items-center gap-2">
+                        {a.image_url ? (
+                          <img src={a.image_url} alt={a.name} className="w-20 h-20 rounded-full object-cover" loading="lazy" />
+                        ) : (
+                          <div className="w-20 h-20 rounded-full bg-gradient-to-br from-green-900/40 to-gray-800 flex items-center justify-center text-3xl">🎤</div>
+                        )}
+                        <p className="text-white font-medium text-sm text-center">{a.name}</p>
+                        {a.genres.length > 0 && (
+                          <p className="text-gray-500 text-xs text-center">{a.genres.slice(0, 2).join(', ')}</p>
+                        )}
+                        {a.tunelog_artist_id ? (
+                          <Link to={`/artists/${a.tunelog_artist_id}`} className="text-xs text-violet-400 hover:text-violet-300 transition-colors font-medium">
+                            View in Tunelog →
+                          </Link>
+                        ) : (
+                          <button
+                            onClick={() => importArtist(a.spotify_id)}
+                            disabled={!!importing[a.spotify_id]}
+                            className="text-xs px-3 py-1 rounded-full bg-green-700/30 text-green-400 border border-green-700/50 hover:bg-green-700/50 disabled:opacity-50 transition-colors font-medium"
+                          >
+                            {importing[a.spotify_id] ? 'Importing…' : '+ Import'}
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </Section>
+              )}
+
+              {(tab === 'All' || tab === 'Albums') && spotifyResults.albums.length > 0 && (
+                <Section title="Albums on Spotify">
+                  <div className="space-y-2">
+                    {spotifyResults.albums.map(a => (
+                      <div key={a.spotify_id} className="card p-3 flex items-center gap-4">
+                        {a.cover_url ? (
+                          <img src={a.cover_url} alt={a.name} className="w-12 h-12 rounded object-cover shrink-0" loading="lazy" />
+                        ) : (
+                          <div className="w-12 h-12 rounded bg-gray-800 flex items-center justify-center text-xl shrink-0">🎵</div>
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <p className="text-white font-medium truncate">{a.name}</p>
+                          <p className="text-gray-500 text-sm">{a.artist_name} · {a.release_date} · {a.track_count} tracks</p>
+                        </div>
+                        {a.tunelog_album_id ? (
+                          <Link to={`/albums/${a.tunelog_album_id}`} className="text-xs text-violet-400 hover:text-violet-300 transition-colors font-medium shrink-0">
+                            View →
+                          </Link>
+                        ) : (
+                          <button
+                            onClick={() => importAlbum(a.spotify_id)}
+                            disabled={!!importing[a.spotify_id]}
+                            className="text-xs px-3 py-1.5 rounded-full bg-green-700/30 text-green-400 border border-green-700/50 hover:bg-green-700/50 disabled:opacity-50 transition-colors font-medium shrink-0"
+                          >
+                            {importing[a.spotify_id] ? 'Importing…' : '+ Import'}
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </Section>
+              )}
+
+              {(tab === 'All' || tab === 'Songs') && spotifyResults.tracks.length > 0 && (
+                <Section title="Tracks on Spotify">
+                  <div className="space-y-2">
+                    {spotifyResults.tracks.map(t => (
+                      <div key={t.spotify_id} className="card p-3 flex items-center gap-4">
+                        {t.cover_url ? (
+                          <img src={t.cover_url} alt="" className="w-10 h-10 rounded object-cover shrink-0" loading="lazy" />
+                        ) : (
+                          <div className="w-10 h-10 rounded bg-gray-800 flex items-center justify-center shrink-0 text-gray-600">♪</div>
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <p className="text-white font-medium truncate">{t.name}</p>
+                          <p className="text-gray-500 text-sm truncate">{t.artist_name}{t.album_name ? ` · ${t.album_name}` : ''}</p>
+                        </div>
+                        {t.tunelog_song_id ? (
+                          <Link to={`/songs/${t.tunelog_song_id}`} className="text-xs text-violet-400 hover:text-violet-300 transition-colors font-medium shrink-0">
+                            View →
+                          </Link>
+                        ) : (
+                          <button
+                            onClick={() => importTrack(t.spotify_id)}
+                            disabled={!!importing[t.spotify_id]}
+                            className="text-xs px-3 py-1.5 rounded-full bg-green-700/30 text-green-400 border border-green-700/50 hover:bg-green-700/50 disabled:opacity-50 transition-colors font-medium shrink-0"
+                          >
+                            {importing[t.spotify_id] ? 'Importing…' : '+ Import'}
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </Section>
+              )}
+            </div>
+          )}
+        </>
+      )}
+
+      {!spotifyLoading && spotifyResults !== null && !hasSpotify && localTotal === 0 && tab !== 'Users' && (
         <div className="text-center text-gray-500 py-12">No results found for "{q}"</div>
       )}
     </div>
+  )
+}
+
+function SparkleIcon({ className = '' }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className}>
+      <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z" />
+    </svg>
   )
 }
 
