@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import axios from 'axios'
 import { useAuth } from '../contexts/AuthContext'
 import StarRating from '../components/StarRating'
-import ReviewCard from '../components/ReviewCard'
+import ReviewList from '../components/ReviewList'
 
 export default function SongPage() {
   const { id } = useParams()
@@ -225,13 +225,7 @@ export default function SongPage() {
 
       {/* Reviews */}
       <h2 className="text-lg font-bold text-white mb-3">Reviews</h2>
-      {reviews.length === 0 ? (
-        <div className="card p-8 text-center text-gray-500">No reviews yet.</div>
-      ) : (
-        <div className="space-y-3">
-          {reviews.map(r => <ReviewCard key={r.id} review={r} />)}
-        </div>
-      )}
+      <ReviewList reviews={reviews} />
 
       {showListModal && (
         <AddToListModal songId={Number(id)} onClose={() => setShowListModal(false)} />
