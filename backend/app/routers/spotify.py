@@ -104,6 +104,28 @@ def _spotify_headers(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
 
 
+def _sync_artist_genres(artist, spotify_genres: list[str], db) -> None:
+    """
+    Map Spotify genre strings onto Genre rows and attach them to the artist.
+    Spotify uses lowercase slugs ("dance pop"); we title-case them to match
+    seed data ("Dance Pop"). Skips genres already linked.
+    """
+    existing_ids = {g.id for g in artist.genres}
+    for raw in spotify_genres[:5]:
+        name = raw.title()  # "dance pop" → "Dance Pop"
+        genre = (
+            db.query(models.Genre).filter(models.Genre.name == name).first()
+            or db.query(models.Genre).filter(models.Genre.name.ilike(raw)).first()
+        )
+        if not genre:
+            genre = models.Genre(name=name)
+            db.add(genre)
+            db.flush()
+        if genre.id not in existing_ids:
+            artist.genres.append(genre)
+            existing_ids.add(genre.id)
+
+
 def _compute_personality(avg: dict) -> str:
     """Derive a human-readable music personality from average audio features."""
     labels = []
@@ -890,6 +912,7 @@ async def import_artist(
         if not artist.image_url and images:
             artist.image_url = images[0]["url"]
         db.flush()
+        _sync_artist_genres(artist, sp_artist.get("genres", []), db)
     else:
         artist = models.Artist(
             name=sp_artist["name"],
@@ -898,6 +921,9 @@ async def import_artist(
         )
         db.add(artist)
         db.flush()
+
+    # ── Save genres from Spotify ──
+    _sync_artist_genres(artist, sp_artist.get("genres", []), db)
 
     # ── Import each album ──
     albums_imported = 0

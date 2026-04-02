@@ -14,9 +14,18 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+# Limit concurrent background embedding tasks to 1 so they don't pile up
+# DB connections and exhaust the Supabase session-mode pool.
+_bg_embed_sem = asyncio.Semaphore(1)
+
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 EMBEDDING_MODEL = "text-embedding-3-small"
 EMBEDDING_DIM = 1536
+
+# Simple in-memory cache: identical text → identical vector, no need to re-call OpenAI.
+# Capped at 2000 entries; oldest entry is evicted when full.
+_CACHE_MAX = 2000
+_embedding_cache: dict[str, list[float]] = {}
 
 
 # ── Text builders ─────────────────────────────────────────────────────────────
@@ -93,14 +102,22 @@ def song_text(song) -> str:
 # ── OpenAI API call ───────────────────────────────────────────────────────────
 
 async def get_embedding(text: str) -> Optional[list[float]]:
-    """Call OpenAI embeddings API and return a 1536-d vector, or None on failure."""
+    """Call OpenAI embeddings API and return a 1536-d vector, or None on failure.
+
+    Results are cached in memory so repeated searches for the same text never
+    re-hit the API — important for staying within OpenAI's free-tier rate limit.
+    """
     if not OPENAI_API_KEY:
         logger.warning("OPENAI_API_KEY not set — skipping embedding generation")
         return None
     text = text.strip()
     if not text:
         return None
-    for attempt in range(3):
+
+    if text in _embedding_cache:
+        return _embedding_cache[text]
+
+    for attempt in range(5):
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.post(
@@ -109,16 +126,20 @@ async def get_embedding(text: str) -> Optional[list[float]]:
                     json={"model": EMBEDDING_MODEL, "input": text},
                 )
             if resp.status_code == 429:
-                wait = 2 ** attempt  # 1s, 2s, 4s
+                wait = 2 ** attempt  # 1s, 2s, 4s, 8s, 16s
                 logger.warning("OpenAI rate limited — retrying in %ds", wait)
                 await asyncio.sleep(wait)
                 continue
             resp.raise_for_status()
-            return resp.json()["data"][0]["embedding"]
+            vec = resp.json()["data"][0]["embedding"]
+            if len(_embedding_cache) >= _CACHE_MAX:
+                _embedding_cache.pop(next(iter(_embedding_cache)))
+            _embedding_cache[text] = vec
+            return vec
         except Exception as exc:
             logger.error("OpenAI embedding error: %s", exc)
             return None
-    logger.error("OpenAI embedding failed after 3 retries (rate limited)")
+    logger.error("OpenAI embedding failed after 5 retries (rate limited)")
     return None
 
 
@@ -149,68 +170,71 @@ async def embed_and_save_song(song, db) -> None:
 # Use these when the original request session may have already closed.
 
 async def reembed_artist_bg(artist_id: int) -> None:
-    from .database import SessionLocal
-    from . import models
-    from sqlalchemy.orm import joinedload
-    db = SessionLocal()
-    try:
-        artist = (
-            db.query(models.Artist)
-            .options(joinedload(models.Artist.genres))
-            .filter(models.Artist.id == artist_id)
-            .first()
-        )
-        if artist:
-            await embed_and_save_artist(artist, db)
-    except Exception as exc:
-        logger.error("Background embed_artist(%d) failed: %s", artist_id, exc)
-    finally:
-        db.close()
+    async with _bg_embed_sem:
+        from .database import SessionLocal
+        from . import models
+        from sqlalchemy.orm import joinedload
+        db = SessionLocal()
+        try:
+            artist = (
+                db.query(models.Artist)
+                .options(joinedload(models.Artist.genres))
+                .filter(models.Artist.id == artist_id)
+                .first()
+            )
+            if artist:
+                await embed_and_save_artist(artist, db)
+        except Exception as exc:
+            logger.error("Background embed_artist(%d) failed: %s", artist_id, exc)
+        finally:
+            db.close()
 
 
 async def reembed_album_bg(album_id: int) -> None:
-    from .database import SessionLocal
-    from . import models
-    from sqlalchemy.orm import joinedload
-    db = SessionLocal()
-    try:
-        album = (
-            db.query(models.Album)
-            .options(
-                joinedload(models.Album.artist).joinedload(models.Artist.genres),
-                joinedload(models.Album.genres),
-                joinedload(models.Album.reviews),
+    async with _bg_embed_sem:
+        from .database import SessionLocal
+        from . import models
+        from sqlalchemy.orm import joinedload
+        db = SessionLocal()
+        try:
+            album = (
+                db.query(models.Album)
+                .options(
+                    joinedload(models.Album.artist).joinedload(models.Artist.genres),
+                    joinedload(models.Album.genres),
+                    joinedload(models.Album.reviews),
+                )
+                .filter(models.Album.id == album_id)
+                .first()
             )
-            .filter(models.Album.id == album_id)
-            .first()
-        )
-        if album:
-            await embed_and_save_album(album, db)
-    except Exception as exc:
-        logger.error("Background embed_album(%d) failed: %s", album_id, exc)
-    finally:
-        db.close()
+            if album:
+                await embed_and_save_album(album, db)
+        except Exception as exc:
+            logger.error("Background embed_album(%d) failed: %s", album_id, exc)
+        finally:
+            db.close()
 
 
 async def reembed_song_bg(song_id: int) -> None:
-    from .database import SessionLocal
-    from . import models
-    from sqlalchemy.orm import joinedload
-    db = SessionLocal()
-    try:
-        song = (
-            db.query(models.Song)
-            .options(
-                joinedload(models.Song.artist).joinedload(models.Artist.genres),
-                joinedload(models.Song.album),
-                joinedload(models.Song.reviews),
+    async with _bg_embed_sem:
+        from .database import SessionLocal
+        from . import models
+        from sqlalchemy.orm import joinedload
+        db = SessionLocal()
+        try:
+            song = (
+                db.query(models.Song)
+                .options(
+                    joinedload(models.Song.artist).joinedload(models.Artist.genres),
+                    joinedload(models.Song.album),
+                    joinedload(models.Song.reviews),
+                )
+                .filter(models.Song.id == song_id)
+                .first()
             )
-            .filter(models.Song.id == song_id)
-            .first()
-        )
-        if song:
-            await embed_and_save_song(song, db)
-    except Exception as exc:
-        logger.error("Background embed_song(%d) failed: %s", song_id, exc)
-    finally:
-        db.close()
+            if song:
+                await embed_and_save_song(song, db)
+        except Exception as exc:
+            logger.error("Background embed_song(%d) failed: %s", song_id, exc)
+        finally:
+            db.close()

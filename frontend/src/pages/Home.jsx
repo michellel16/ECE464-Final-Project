@@ -7,11 +7,13 @@ import { Avatar } from '../components/Navbar'
 
 export default function Home() {
   const { user } = useAuth()
-  const [albums, setAlbums]   = useState([])
-  const [artists, setArtists] = useState([])
-  const [songs, setSongs]     = useState([])
-  const [feed, setFeed]       = useState([])
-  const [loading, setLoading] = useState(true)
+  const [albums, setAlbums]                     = useState([])
+  const [artists, setArtists]                   = useState([])
+  const [songs, setSongs]                       = useState([])
+  const [feed, setFeed]                         = useState([])
+  const [recommended, setRecommended]           = useState([])
+  const [recommendedArtists, setRecArtists]     = useState([])
+  const [loading, setLoading]                   = useState(true)
 
   useEffect(() => {
     const fetches = [
@@ -27,6 +29,15 @@ export default function Home() {
       setSongs(songsRes.data)
       if (feedRes) setFeed(feedRes.data)
     }).finally(() => setLoading(false))
+
+    if (user) {
+      axios.get('/api/music/songs/recommended')
+        .then(r => setRecommended(r.data))
+        .catch(() => setRecommended([]))
+      axios.get('/api/music/artists/recommended')
+        .then(r => setRecArtists(r.data))
+        .catch(() => setRecArtists([]))
+    }
   }, [user])
 
   if (loading) return <PageLoader />
@@ -78,6 +89,34 @@ export default function Home() {
           {songs.map(s => <SongRow key={s.id} song={s} />)}
         </div>
       </section>
+
+      {/* Recommended Artists */}
+      {user && recommendedArtists.length > 0 && (
+        <section>
+          <div className="mb-5">
+            <h2 className="text-xl font-bold text-white">Recommended Artists</h2>
+            <p className="text-gray-500 text-sm mt-0.5">Artists you might enjoy based on your taste</p>
+          </div>
+          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-4">
+            {recommendedArtists.map(a => <RecommendedArtistCard key={a.id} artist={a} />)}
+          </div>
+        </section>
+      )}
+
+      {/* Recommended Songs */}
+      {user && recommended.length > 0 && (
+        <section>
+          <div className="flex items-center justify-between mb-5">
+            <div>
+              <h2 className="text-xl font-bold text-white">Recommended Songs</h2>
+              <p className="text-gray-500 text-sm mt-0.5">Picked for you based on your taste</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {recommended.map(s => <RecommendedSongRow key={s.id} song={s} />)}
+          </div>
+        </section>
+      )}
 
       {/* Activity feed */}
       {user && (
@@ -134,6 +173,46 @@ function SongRow({ song }) {
       <div className="min-w-0 flex-1">
         <p className="text-white text-sm font-medium truncate group-hover:text-violet-400 transition-colors">{song.title}</p>
         <p className="text-gray-500 text-xs truncate">{song.artist?.name}{song.album ? ` · ${song.album.title}` : ''}</p>
+      </div>
+      {song.average_rating && (
+        <span className="text-yellow-400 text-xs shrink-0">★ {song.average_rating.toFixed(1)}</span>
+      )}
+    </Link>
+  )
+}
+
+function RecommendedArtistCard({ artist }) {
+  return (
+    <Link to={`/artists/${artist.id}`} className="group block text-center">
+      <div className="aspect-square bg-gray-800 rounded-full overflow-hidden mb-3 mx-auto w-28 sm:w-36">
+        {artist.image_url ? (
+          <img src={artist.image_url} alt={artist.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" loading="lazy" />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center text-4xl bg-gradient-to-br from-violet-900/60 to-gray-800">🎤</div>
+        )}
+      </div>
+      <p className="text-white font-medium text-sm group-hover:text-violet-400 transition-colors">{artist.name}</p>
+      {artist.reason && (
+        <p className="text-violet-400/70 text-xs mt-0.5 truncate px-1">{artist.reason}</p>
+      )}
+    </Link>
+  )
+}
+
+function RecommendedSongRow({ song }) {
+  return (
+    <Link to={`/songs/${song.id}`} className="card p-3 flex items-center gap-3 hover:border-violet-700 transition-colors group">
+      {song.album?.cover_url ? (
+        <img src={song.album.cover_url} alt="" className="w-10 h-10 rounded object-cover shrink-0" loading="lazy" />
+      ) : (
+        <div className="w-10 h-10 rounded bg-gray-800 flex items-center justify-center text-gray-500 shrink-0">♪</div>
+      )}
+      <div className="min-w-0 flex-1">
+        <p className="text-white text-sm font-medium truncate group-hover:text-violet-400 transition-colors">{song.title}</p>
+        <p className="text-gray-500 text-xs truncate">{song.artist?.name}{song.album ? ` · ${song.album.title}` : ''}</p>
+        {song.reason && (
+          <p className="text-violet-400/70 text-xs truncate mt-0.5">{song.reason}</p>
+        )}
       </div>
       {song.average_rating && (
         <span className="text-yellow-400 text-xs shrink-0">★ {song.average_rating.toFixed(1)}</span>

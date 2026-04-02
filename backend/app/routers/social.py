@@ -17,8 +17,7 @@ def get_feed(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    following_ids = [f.followed_id for f in current_user.following]
-    following_ids.append(current_user.id)
+    following_ids = [current_user.id]
 
     one_month_ago = datetime.utcnow() - timedelta(days=30)
     activities = (
