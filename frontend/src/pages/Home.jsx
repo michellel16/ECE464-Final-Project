@@ -31,12 +31,9 @@ export default function Home() {
     }).finally(() => setLoading(false))
 
     if (user) {
-      axios.get('/api/music/songs/recommended')
-        .then(r => setRecommended(r.data))
-        .catch(() => setRecommended([]))
-      axios.get('/api/music/artists/recommended')
-        .then(r => setRecArtists(r.data))
-        .catch(() => setRecArtists([]))
+      axios.get('/api/music/recommended?song_limit=8')
+        .then(r => { setRecommended(r.data.songs); setRecArtists(r.data.artists) })
+        .catch(() => {})
     }
   }, [user])
 

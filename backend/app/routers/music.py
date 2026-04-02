@@ -33,6 +33,29 @@ def _review_count(db, *, album_id=None, song_id=None):
     return q.scalar() or 0
 
 
+def _batch_album_stats(db, album_ids: list) -> tuple[dict, dict, dict]:
+    """Returns (avg_map, count_map, song_count_map) keyed by album_id."""
+    if not album_ids:
+        return {}, {}, {}
+    avg_map: dict[int, float | None] = {}
+    count_map: dict[int, int] = {}
+    for album_id, avg, cnt in (
+        db.query(models.Review.album_id, func.avg(models.Review.rating), func.count(models.Review.id))
+        .filter(models.Review.album_id.in_(album_ids))
+        .group_by(models.Review.album_id)
+        .all()
+    ):
+        avg_map[album_id] = round(float(avg), 2) if avg else None
+        count_map[album_id] = cnt
+    song_count_map = dict(
+        db.query(models.Song.album_id, func.count(models.Song.id))
+        .filter(models.Song.album_id.in_(album_ids))
+        .group_by(models.Song.album_id)
+        .all()
+    )
+    return avg_map, count_map, song_count_map
+
+
 def _recency(dt) -> float:
     """Boost weight for recent interactions."""
     if not dt:
@@ -202,19 +225,175 @@ def get_genres(db: Session = Depends(get_db)):
 # ── Artists ───────────────────────────────────────────────────────────────────
 
 @router.get("/artists")
-async def list_artists(skip: int = 0, limit: int = 50, db: Session = Depends(get_db)):
-    artists = db.query(models.Artist).offset(skip).limit(limit).all()
-    await _enrich_missing_images(db, artists, [])
+def list_artists(skip: int = 0, limit: int = 50, db: Session = Depends(get_db)):
+    artists = (
+        db.query(models.Artist)
+        .options(joinedload(models.Artist.genres))
+        .offset(skip).limit(limit).all()
+    )
+    artist_ids = [a.id for a in artists]
+    album_counts = dict(
+        db.query(models.Album.artist_id, func.count(models.Album.id))
+        .filter(models.Album.artist_id.in_(artist_ids))
+        .group_by(models.Album.artist_id)
+        .all()
+    ) if artist_ids else {}
     return [
         {
             "id": a.id, "name": a.name, "bio": a.bio,
             "image_url": a.image_url, "formed_year": a.formed_year,
             "country": a.country,
             "genres": [{"id": g.id, "name": g.name} for g in a.genres],
-            "album_count": len(a.albums),
+            "album_count": album_counts.get(a.id, 0),
         }
         for a in artists
     ]
+
+
+@router.get("/recommended")
+def recommended_combined(
+    artist_limit: int = 6,
+    song_limit: int = 6,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """Return recommended artists + songs in a single request (shared affinity build)."""
+    uid = current_user.id
+    artist_scores, liked_artist_ids, liked_genre_counts, genre_to_liked_artists = \
+        _build_affinity(uid, db)
+
+    liked_genre_ids = set(liked_genre_counts)
+    interacted_ids = set(artist_scores.keys())
+
+    # ── Artists ──────────────────────────────────────────────────────────────
+    artist_candidates = (
+        db.query(models.Artist)
+        .options(joinedload(models.Artist.genres))
+        .filter(~models.Artist.id.in_(interacted_ids))
+        .all()
+    )
+
+    def _artist_score(a: models.Artist) -> float:
+        return sum(liked_genre_counts[g.id] for g in a.genres if g.id in liked_genre_ids)
+
+    def _artist_reason(a: models.Artist) -> str:
+        best = max((g for g in a.genres if g.id in liked_genre_ids),
+                   key=lambda g: liked_genre_counts[g.id], default=None)
+        if best:
+            similar = genre_to_liked_artists.get(best.id, [])
+            return f"Similar to {similar[0]}" if similar else f"Based on your love of {best.name}"
+        return "You might enjoy this"
+
+    sorted_artists = [a for a in sorted(artist_candidates, key=_artist_score, reverse=True) if _artist_score(a) > 0]
+    top_artists = _diverse_pick(
+        sorted_artists, artist_limit,
+        get_artist_id=lambda a: a.id,
+        get_genre_ids=lambda a: [g.id for g in a.genres],
+        max_per_artist=1, max_per_genre=2,
+    )
+
+    # ── Songs ─────────────────────────────────────────────────────────────────
+    seen_song_ids: set[int] = {
+        row[0] for row in
+        db.query(models.Review.song_id)
+        .filter(models.Review.user_id == uid, models.Review.song_id.isnot(None))
+        .all()
+    } | {
+        row[0] for row in
+        db.query(models.UserSongStatus.song_id)
+        .filter(models.UserSongStatus.user_id == uid)
+        .all()
+    }
+    interacted_album_ids: set[int] = {
+        row[0] for row in
+        db.query(models.UserAlbumStatus.album_id)
+        .filter(models.UserAlbumStatus.user_id == uid)
+        .all()
+    }
+    if interacted_album_ids:
+        seen_song_ids |= {
+            row[0] for row in
+            db.query(models.Song.id)
+            .filter(models.Song.album_id.in_(interacted_album_ids))
+            .all()
+        }
+    list_ids = [r[0] for r in db.query(models.List.id).filter_by(user_id=uid).all()]
+    if list_ids:
+        seen_song_ids |= {
+            row[0] for row in
+            db.query(models.ListItem.song_id)
+            .filter(models.ListItem.list_id.in_(list_ids), models.ListItem.song_id.isnot(None))
+            .all()
+        }
+
+    avg_ratings: dict[int, float] = {
+        sid: float(avg)
+        for sid, avg in db.query(models.Review.song_id, func.avg(models.Review.rating))
+        .filter(models.Review.song_id.isnot(None))
+        .group_by(models.Review.song_id)
+        .all()
+    }
+
+    song_candidates = (
+        db.query(models.Song)
+        .options(
+            joinedload(models.Song.artist).joinedload(models.Artist.genres),
+            joinedload(models.Song.album),
+        )
+        .filter(~models.Song.id.in_(seen_song_ids) if seen_song_ids else True)
+        .all()
+    )
+
+    def _song_score(s: models.Song) -> float:
+        score = sum(
+            liked_genre_counts[g.id]
+            for g in (s.artist.genres if s.artist else [])
+            if g.id in liked_genre_ids
+        )
+        score += artist_scores.get(s.artist_id, 0.0) * 0.5
+        score += avg_ratings.get(s.id, 0.0)
+        return score
+
+    def _song_reason(s: models.Song) -> str:
+        if artist_scores.get(s.artist_id, 0.0) >= 1.0:
+            return f"Because you like {s.artist.name}"
+        best = max(
+            (g for g in (s.artist.genres if s.artist else []) if g.id in liked_genre_ids),
+            key=lambda g: liked_genre_counts[g.id], default=None,
+        )
+        if best:
+            similar = genre_to_liked_artists.get(best.id, [])
+            return f"Similar to {similar[0]}" if similar else f"Based on your love of {best.name}"
+        r = avg_ratings.get(s.id)
+        return f"Highly rated · ★ {r:.1f}" if r and r >= 4.0 else "Popular on Tunelog"
+
+    top_songs = _diverse_pick(
+        sorted(song_candidates, key=_song_score, reverse=True), song_limit,
+        get_artist_id=lambda s: s.artist_id,
+        get_genre_ids=lambda s: [g.id for g in (s.artist.genres if s.artist else [])],
+        max_per_artist=1, max_per_genre=2,
+    )
+
+    return {
+        "artists": [
+            {
+                "id": a.id, "name": a.name, "image_url": a.image_url,
+                "genres": [g.name for g in a.genres],
+                "reason": _artist_reason(a),
+            }
+            for a in top_artists
+        ],
+        "songs": [
+            {
+                "id": s.id, "title": s.title,
+                "artist": {"id": s.artist.id, "name": s.artist.name},
+                "album": {"id": s.album.id, "title": s.album.title, "cover_url": s.album.cover_url} if s.album else None,
+                "average_rating": round(avg_ratings[s.id], 2) if s.id in avg_ratings else None,
+                "reason": _song_reason(s),
+            }
+            for s in top_songs
+        ],
+    }
 
 
 @router.get("/artists/recommended")
@@ -292,41 +471,55 @@ async def get_artist(artist_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/artists/{artist_id}/albums")
-async def get_artist_albums(artist_id: int, db: Session = Depends(get_db)):
+def get_artist_albums(artist_id: int, db: Session = Depends(get_db)):
     artist = db.query(models.Artist).filter(models.Artist.id == artist_id).first()
     if not artist:
         raise HTTPException(status_code=404, detail="Artist not found")
-    await _enrich_missing_images(db, [], artist.albums)
+    albums = (
+        db.query(models.Album)
+        .options(joinedload(models.Album.genres))
+        .filter(models.Album.artist_id == artist_id)
+        .all()
+    )
+    album_ids = [al.id for al in albums]
+    avg_map, count_map, song_count_map = _batch_album_stats(db, album_ids)
     return [
         {
             "id": al.id, "title": al.title, "artist_id": al.artist_id,
             "release_date": al.release_date, "cover_url": al.cover_url,
             "description": al.description,
             "genres": [{"id": g.id, "name": g.name} for g in al.genres],
-            "average_rating": _avg_rating(db, album_id=al.id),
-            "review_count": _review_count(db, album_id=al.id),
-            "song_count": len(al.songs),
+            "average_rating": avg_map.get(al.id),
+            "review_count": count_map.get(al.id, 0),
+            "song_count": song_count_map.get(al.id, 0),
         }
-        for al in artist.albums
+        for al in albums
     ]
 
 
 # ── Albums ────────────────────────────────────────────────────────────────────
 
 @router.get("/albums")
-async def list_albums(skip: int = 0, limit: int = 30, db: Session = Depends(get_db)):
-    albums = db.query(models.Album).offset(skip).limit(limit).all()
-    artists = list({al.artist for al in albums if al.artist})
-    await _enrich_missing_images(db, artists, albums)
+def list_albums(skip: int = 0, limit: int = 30, db: Session = Depends(get_db)):
+    albums = (
+        db.query(models.Album)
+        .options(
+            joinedload(models.Album.artist),
+            joinedload(models.Album.genres),
+        )
+        .offset(skip).limit(limit).all()
+    )
+    album_ids = [al.id for al in albums]
+    avg_map, count_map, _ = _batch_album_stats(db, album_ids)
     return [
         {
             "id": al.id, "title": al.title, "artist_id": al.artist_id,
-            "artist": {"id": al.artist.id, "name": al.artist.name, "image_url": al.artist.image_url},
+            "artist": {"id": al.artist.id, "name": al.artist.name, "image_url": al.artist.image_url} if al.artist else None,
             "release_date": al.release_date, "cover_url": al.cover_url,
             "description": al.description,
             "genres": [{"id": g.id, "name": g.name} for g in al.genres],
-            "average_rating": _avg_rating(db, album_id=al.id),
-            "review_count": _review_count(db, album_id=al.id),
+            "average_rating": avg_map.get(al.id),
+            "review_count": count_map.get(al.id, 0),
         }
         for al in albums
     ]
@@ -334,13 +527,35 @@ async def list_albums(skip: int = 0, limit: int = 30, db: Session = Depends(get_
 
 @router.get("/albums/{album_id}")
 async def get_album(album_id: int, db: Session = Depends(get_db)):
-    al = db.query(models.Album).filter(models.Album.id == album_id).first()
+    al = (
+        db.query(models.Album)
+        .options(
+            joinedload(models.Album.artist),
+            joinedload(models.Album.genres),
+            joinedload(models.Album.songs),
+        )
+        .filter(models.Album.id == album_id)
+        .first()
+    )
     if not al:
         raise HTTPException(status_code=404, detail="Album not found")
     await _enrich_missing_images(db, [al.artist] if al.artist else [], [al])
+    song_ids = [s.id for s in al.songs]
+    song_avg_map: dict[int, float] = {}
+    if song_ids:
+        song_avg_map = {
+            sid: round(float(avg), 2)
+            for sid, avg in (
+                db.query(models.Review.song_id, func.avg(models.Review.rating))
+                .filter(models.Review.song_id.in_(song_ids))
+                .group_by(models.Review.song_id)
+                .all()
+            )
+        }
+    album_avg_map, album_count_map, _ = _batch_album_stats(db, [album_id])
     return {
         "id": al.id, "title": al.title, "artist_id": al.artist_id,
-        "artist": {"id": al.artist.id, "name": al.artist.name, "image_url": al.artist.image_url},
+        "artist": {"id": al.artist.id, "name": al.artist.name, "image_url": al.artist.image_url} if al.artist else None,
         "release_date": al.release_date, "cover_url": al.cover_url,
         "description": al.description,
         "genres": [{"id": g.id, "name": g.name} for g in al.genres],
@@ -348,14 +563,14 @@ async def get_album(album_id: int, db: Session = Depends(get_db)):
             {
                 "id": s.id, "title": s.title,
                 "track_number": s.track_number, "duration_seconds": s.duration_seconds,
-                "average_rating": _avg_rating(db, song_id=s.id),
+                "average_rating": song_avg_map.get(s.id),
                 "spotify_id": s.spotify_id,
                 "spotify_preview_url": s.spotify_preview_url,
             }
             for s in al.songs
         ],
-        "average_rating": _avg_rating(db, album_id=al.id),
-        "review_count": _review_count(db, album_id=al.id),
+        "average_rating": album_avg_map.get(album_id),
+        "review_count": album_count_map.get(album_id, 0),
     }
 
 
@@ -363,15 +578,34 @@ async def get_album(album_id: int, db: Session = Depends(get_db)):
 
 @router.get("/songs")
 def list_songs(skip: int = 0, limit: int = 50, db: Session = Depends(get_db)):
-    songs = db.query(models.Song).offset(skip).limit(limit).all()
+    songs = (
+        db.query(models.Song)
+        .options(
+            joinedload(models.Song.artist),
+            joinedload(models.Song.album),
+        )
+        .offset(skip).limit(limit).all()
+    )
+    song_ids = [s.id for s in songs]
+    avg_map: dict[int, float] = {}
+    if song_ids:
+        avg_map = {
+            sid: round(float(avg), 2)
+            for sid, avg in (
+                db.query(models.Review.song_id, func.avg(models.Review.rating))
+                .filter(models.Review.song_id.in_(song_ids))
+                .group_by(models.Review.song_id)
+                .all()
+            )
+        }
     return [
         {
             "id": s.id, "title": s.title, "artist_id": s.artist_id,
-            "artist": {"id": s.artist.id, "name": s.artist.name},
+            "artist": {"id": s.artist.id, "name": s.artist.name} if s.artist else None,
             "album_id": s.album_id,
             "album": {"id": s.album.id, "title": s.album.title, "cover_url": s.album.cover_url} if s.album else None,
             "duration_seconds": s.duration_seconds, "track_number": s.track_number,
-            "average_rating": _avg_rating(db, song_id=s.id),
+            "average_rating": avg_map.get(s.id),
         }
         for s in songs
     ]
