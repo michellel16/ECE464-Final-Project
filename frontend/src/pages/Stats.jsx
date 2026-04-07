@@ -1,19 +1,57 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import axios from 'axios'
+import { toPng } from 'html-to-image'
 import { useAuth } from '../contexts/AuthContext'
 import StarRating from '../components/StarRating'
+import StatsPostcard from '../components/StatsPostcard'
+
+const SPAN_OPTIONS = [
+  { value: '7d',  label: '7 Days' },
+  { value: '30d', label: '30 Days' },
+  { value: '90d', label: '90 Days' },
+  { value: '1y',  label: '1 Year' },
+  { value: 'all', label: 'All Time' },
+]
 
 export default function Stats() {
   const { user } = useAuth()
   const [stats, setStats] = useState(null)
   const [loading, setLoading] = useState(true)
 
+  // Postcard state
+  const [postcardSpan, setPostcardSpan] = useState('30d')
+  const [postcardData, setPostcardData] = useState(null)
+  const [postcardLoading, setPostcardLoading] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const postcardRef = useRef(null)
+
   useEffect(() => {
     axios.get('/api/stats/me')
       .then(r => setStats(r.data))
       .finally(() => setLoading(false))
   }, [])
+
+  useEffect(() => {
+    setPostcardLoading(true)
+    axios.get(`/api/stats/me/postcard?time_span=${postcardSpan}`)
+      .then(r => setPostcardData(r.data))
+      .finally(() => setPostcardLoading(false))
+  }, [postcardSpan])
+
+  const handleExport = useCallback(async () => {
+    if (!postcardRef.current) return
+    setExporting(true)
+    try {
+      const dataUrl = await toPng(postcardRef.current, { pixelRatio: 2, cacheBust: true })
+      const link = document.createElement('a')
+      link.download = `tunelog-${user?.username ?? 'stats'}-${postcardSpan}.png`
+      link.href = dataUrl
+      link.click()
+    } finally {
+      setExporting(false)
+    }
+  }, [postcardSpan, user?.username])
 
   if (loading) return <Loader />
 
@@ -180,6 +218,70 @@ export default function Stats() {
           <Link to="/discover" className="btn-primary">Explore Music</Link>
         </div>
       )}
+
+      {/* ── Postcard Export ─────────────────────────────────────────────── */}
+      <div className="space-y-5">
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <div>
+            <h2 className="font-bold text-white text-lg">Export Postcard</h2>
+            <p className="text-gray-500 text-sm mt-0.5">
+              Download a shareable summary of your listening stats
+            </p>
+          </div>
+          <button
+            onClick={handleExport}
+            disabled={exporting || postcardLoading || !postcardData}
+            className="btn-primary flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {exporting ? (
+              <>
+                <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                Exporting…
+              </>
+            ) : (
+              <>
+                <DownloadIcon />
+                Download PNG
+              </>
+            )}
+          </button>
+        </div>
+
+        {/* Time span selector */}
+        <div className="flex gap-2 flex-wrap">
+          {SPAN_OPTIONS.map(opt => (
+            <button
+              key={opt.value}
+              onClick={() => setPostcardSpan(opt.value)}
+              className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                postcardSpan === opt.value
+                  ? 'bg-violet-600 text-white'
+                  : 'bg-gray-800 text-gray-400 hover:text-white hover:bg-gray-700'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Postcard preview */}
+        <div className="flex justify-center">
+          {postcardLoading ? (
+            <div className="flex items-center justify-center h-64">
+              <div className="w-8 h-8 border-4 border-violet-600 border-t-transparent rounded-full animate-spin" />
+            </div>
+          ) : postcardData ? (
+            <div className="overflow-hidden rounded-2xl shadow-2xl shadow-violet-900/30">
+              <StatsPostcard
+                ref={postcardRef}
+                data={postcardData}
+                username={user?.username}
+                timeSpan={postcardSpan}
+              />
+            </div>
+          ) : null}
+        </div>
+      </div>
     </div>
   )
 }
@@ -225,5 +327,16 @@ function Loader() {
     <div className="flex items-center justify-center min-h-[60vh]">
       <div className="w-10 h-10 border-4 border-violet-600 border-t-transparent rounded-full animate-spin" />
     </div>
+  )
+}
+
+function DownloadIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="7 10 12 15 17 10" />
+      <line x1="12" y1="15" x2="12" y2="3" />
+    </svg>
   )
 }
