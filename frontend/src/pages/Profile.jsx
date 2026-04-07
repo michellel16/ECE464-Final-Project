@@ -4,6 +4,7 @@ import axios from 'axios'
 import { useAuth } from '../contexts/AuthContext'
 import { Avatar } from '../components/Navbar'
 import StarRating from '../components/StarRating'
+import { supabase } from '../lib/supabase'
 
 export default function Profile() {
   const { username } = useParams()
@@ -22,6 +23,7 @@ export default function Profile() {
   const [showImport, setShowImport] = useState(false)
   const [showSpotifyMenu, setShowSpotifyMenu] = useState(false)
   const [showEditProfile, setShowEditProfile] = useState(false)
+  const [showAccountSettings, setShowAccountSettings] = useState(false)
   const [followModal, setFollowModal] = useState(null)  // 'followers' | 'following' | null
 
   const isMe = me?.username === username
@@ -146,7 +148,10 @@ export default function Profile() {
             </button>
           )}
           {isMe && (
-            <button onClick={() => setShowEditProfile(true)} className="btn-secondary text-sm">Edit Profile</button>
+            <div className="flex gap-2">
+              <button onClick={() => setShowEditProfile(true)} className="btn-secondary text-sm">Edit Profile</button>
+              <button onClick={() => setShowAccountSettings(true)} className="btn-secondary text-sm">Account</button>
+            </div>
           )}
         </div>
 
@@ -252,6 +257,14 @@ export default function Profile() {
             }
             setShowEditProfile(false)
           }}
+        />
+      )}
+
+      {/* Account settings modal */}
+      {showAccountSettings && (
+        <AccountSettingsModal
+          email={profile.email}
+          onClose={() => setShowAccountSettings(false)}
         />
       )}
 
@@ -806,6 +819,153 @@ function EditProfileModal({ profile, onClose, onSaved }) {
           <button onClick={save} disabled={saving || avatarUploading} className="btn-primary text-sm disabled:opacity-50">
             {saving ? 'Saving…' : 'Save'}
           </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Account Settings Modal ────────────────────────────────────────────────────
+
+function AccountSettingsModal({ email, onClose }) {
+  const [section, setSection] = useState('password') // 'password' | 'email'
+
+  // Password state
+  const [currentPw, setCurrentPw]   = useState('')
+  const [newPw, setNewPw]           = useState('')
+  const [confirmPw, setConfirmPw]   = useState('')
+  const [pwSaving, setPwSaving]     = useState(false)
+  const [pwError, setPwError]       = useState(null)
+  const [pwSuccess, setPwSuccess]   = useState(false)
+
+  // Email state
+  const [newEmail, setNewEmail]     = useState('')
+  const [emailSaving, setEmailSaving] = useState(false)
+  const [emailError, setEmailError] = useState(null)
+  const [emailSent, setEmailSent]   = useState(false)
+
+  async function changePassword() {
+    if (!currentPw) { setPwError('Enter your current password'); return }
+    if (newPw.length < 6) { setPwError('New password must be at least 6 characters'); return }
+    if (newPw !== confirmPw) { setPwError('Passwords do not match'); return }
+    setPwSaving(true)
+    setPwError(null)
+    try {
+      // Re-authenticate to verify current password
+      const { error: signInErr } = await supabase.auth.signInWithPassword({ email, password: currentPw })
+      if (signInErr) { setPwError('Current password is incorrect'); return }
+      // Update password
+      const { error: updateErr } = await supabase.auth.updateUser({ password: newPw })
+      if (updateErr) throw new Error(updateErr.message)
+      setPwSuccess(true)
+      setCurrentPw(''); setNewPw(''); setConfirmPw('')
+    } catch (e) {
+      setPwError(e.message || 'Failed to change password')
+    } finally {
+      setPwSaving(false)
+    }
+  }
+
+  async function changeEmail() {
+    const trimmed = newEmail.trim()
+    if (!trimmed) { setEmailError('Enter a new email address'); return }
+    if (trimmed === email) { setEmailError('That is your current email'); return }
+    setEmailSaving(true)
+    setEmailError(null)
+    try {
+      const { error } = await supabase.auth.updateUser({ email: trimmed })
+      if (error) throw new Error(error.message)
+      setEmailSent(true)
+    } catch (e) {
+      setEmailError(e.message || 'Failed to send verification email')
+    } finally {
+      setEmailSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-md shadow-2xl">
+        <div className="flex items-center justify-between p-5 border-b border-gray-800">
+          <h2 className="font-bold text-white text-lg">Account Settings</h2>
+          <button onClick={onClose} className="text-gray-500 hover:text-white text-xl leading-none">&times;</button>
+        </div>
+
+        {/* Section tabs */}
+        <div className="flex border-b border-gray-800">
+          {['password', 'email'].map(s => (
+            <button
+              key={s}
+              onClick={() => setSection(s)}
+              className={`flex-1 py-3 text-sm font-medium capitalize transition-colors border-b-2 -mb-px ${
+                section === s ? 'border-violet-500 text-violet-400' : 'border-transparent text-gray-500 hover:text-gray-300'
+              }`}
+            >
+              Change {s}
+            </button>
+          ))}
+        </div>
+
+        <div className="p-5 space-y-4">
+          {section === 'password' && (
+            <>
+              {pwSuccess ? (
+                <div className="bg-green-900/30 border border-green-700/50 rounded-lg p-4 text-center">
+                  <p className="text-green-400 font-medium">Password updated successfully.</p>
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <label className="block text-sm text-gray-400 mb-1">Current password</label>
+                    <input type="password" className="input w-full" value={currentPw} onChange={e => setCurrentPw(e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-gray-400 mb-1">New password</label>
+                    <input type="password" className="input w-full" value={newPw} onChange={e => setNewPw(e.target.value)} placeholder="At least 6 characters" />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-gray-400 mb-1">Confirm new password</label>
+                    <input type="password" className="input w-full" value={confirmPw} onChange={e => setConfirmPw(e.target.value)} />
+                  </div>
+                  {pwError && <p className="text-red-400 text-sm">{pwError}</p>}
+                  <button onClick={changePassword} disabled={pwSaving} className="btn-primary text-sm w-full disabled:opacity-50">
+                    {pwSaving ? 'Updating…' : 'Update password'}
+                  </button>
+                </>
+              )}
+            </>
+          )}
+
+          {section === 'email' && (
+            <>
+              {emailSent ? (
+                <div className="bg-violet-900/30 border border-violet-700/50 rounded-lg p-4 text-center space-y-1">
+                  <p className="text-violet-300 font-medium">Verification email sent!</p>
+                  <p className="text-gray-400 text-sm">Check <strong>{newEmail.trim()}</strong> and click the link to confirm your new email address.</p>
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <label className="block text-sm text-gray-400 mb-1">Current email</label>
+                    <p className="text-gray-300 text-sm bg-gray-800 rounded-lg px-3 py-2">{email}</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm text-gray-400 mb-1">New email</label>
+                    <input type="email" className="input w-full" value={newEmail} onChange={e => setNewEmail(e.target.value)} placeholder="you@example.com" />
+                    <p className="text-xs text-gray-600 mt-1">A confirmation link will be sent to this address.</p>
+                  </div>
+                  {emailError && <p className="text-red-400 text-sm">{emailError}</p>}
+                  <button onClick={changeEmail} disabled={emailSaving} className="btn-primary text-sm w-full disabled:opacity-50">
+                    {emailSaving ? 'Sending…' : 'Send verification email'}
+                  </button>
+                </>
+              )}
+            </>
+          )}
+        </div>
+
+        <div className="flex justify-end p-5 pt-0">
+          <button onClick={onClose} className="btn-secondary text-sm">Close</button>
         </div>
       </div>
     </div>

@@ -117,7 +117,7 @@ async def get_embedding(text: str) -> Optional[list[float]]:
     if text in _embedding_cache:
         return _embedding_cache[text]
 
-    for attempt in range(5):
+    for attempt in range(3):
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.post(
@@ -126,7 +126,10 @@ async def get_embedding(text: str) -> Optional[list[float]]:
                     json={"model": EMBEDDING_MODEL, "input": text},
                 )
             if resp.status_code == 429:
-                wait = 2 ** attempt  # 1s, 2s, 4s, 8s, 16s
+                if attempt == 2:
+                    logger.warning("OpenAI rate limited — giving up after 3 attempts")
+                    return None
+                wait = 2 ** attempt  # 1s, 2s
                 logger.warning("OpenAI rate limited — retrying in %ds", wait)
                 await asyncio.sleep(wait)
                 continue
@@ -139,7 +142,6 @@ async def get_embedding(text: str) -> Optional[list[float]]:
         except Exception as exc:
             logger.error("OpenAI embedding error: %s", exc)
             return None
-    logger.error("OpenAI embedding failed after 5 retries (rate limited)")
     return None
 
 

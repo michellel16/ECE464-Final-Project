@@ -872,7 +872,7 @@ async def import_artist(
     current_user: models.User = Depends(get_current_user),
 ):
     """
-    Import a Spotify artist into Tunelog and their top albums (up to 5 studio albums).
+    Import a Spotify artist into Tunelog and their top releases (up to 5 albums, singles, and EPs).
     Body: { spotify_artist_id: str }
     Returns { artist_id, albums_imported }
     """
@@ -891,12 +891,19 @@ async def import_artist(
             raise HTTPException(status_code=502, detail="Failed to fetch artist from Spotify")
         sp_artist = art_resp.json()
 
-        # Fetch albums (studio albums only, latest first)
+        # Fetch albums + singles/EPs, latest first
         alb_resp = await client.get(
             f"https://api.spotify.com/v1/artists/{spotify_artist_id}/albums",
-            params={"include_groups": "album", "limit": 5, "market": "US"},
+            params={"include_groups": "album,single", "limit": 5, "market": "US"},
             headers=_spotify_headers(token),
         )
+        if alb_resp.status_code == 429:
+            await asyncio.sleep(int(alb_resp.headers.get("Retry-After", 2)))
+            alb_resp = await client.get(
+                f"https://api.spotify.com/v1/artists/{spotify_artist_id}/albums",
+                params={"include_groups": "album,single", "limit": 5, "market": "US"},
+                headers=_spotify_headers(token),
+            )
         sp_albums = alb_resp.json().get("items", []) if alb_resp.status_code == 200 else []
 
     # ── Resolve / create artist ──
@@ -995,7 +1002,7 @@ async def import_artist(
                 acousticness=f.get("acousticness"),
                 instrumentalness=f.get("instrumentalness"),
             ))
-        albums_imported += 1
+            albums_imported += 1
 
     db.commit()
 

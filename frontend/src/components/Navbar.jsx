@@ -2,29 +2,73 @@ import { useState, useRef, useEffect } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 
+const HISTORY_KEY = 'tunelog_search_history'
+const HISTORY_LIMIT = 8
+
+function loadHistory() {
+  try { return JSON.parse(localStorage.getItem(HISTORY_KEY)) ?? [] } catch { return [] }
+}
+
+function saveHistory(history) {
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(history))
+}
+
 export default function Navbar() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
-  const [q, setQ]           = useState('')
-  const [menuOpen, setMenu] = useState(false)
-  const menuRef = useRef(null)
+  const [q, setQ]               = useState('')
+  const [menuOpen, setMenu]     = useState(false)
+  const [showHistory, setShowHistory] = useState(false)
+  const [history, setHistory]   = useState(loadHistory)
+  const menuRef   = useRef(null)
+  const searchRef = useRef(null)
 
   // Close dropdown on outside click
   useEffect(() => {
     function handler(e) {
       if (menuRef.current && !menuRef.current.contains(e.target)) setMenu(false)
+      if (searchRef.current && !searchRef.current.contains(e.target)) setShowHistory(false)
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
+  function addToHistory(term) {
+    const trimmed = term.trim()
+    if (!trimmed) return
+    const updated = [trimmed, ...history.filter(h => h !== trimmed)].slice(0, HISTORY_LIMIT)
+    setHistory(updated)
+    saveHistory(updated)
+  }
+
+  function removeFromHistory(term, e) {
+    e.stopPropagation()
+    const updated = history.filter(h => h !== term)
+    setHistory(updated)
+    saveHistory(updated)
+  }
+
+  function clearHistory() {
+    setHistory([])
+    saveHistory([])
+  }
+
   function handleSearch(e) {
     e.preventDefault()
     if (q.trim()) {
+      addToHistory(q.trim())
       navigate(`/search?q=${encodeURIComponent(q.trim())}`)
       setQ('')
+      setShowHistory(false)
     }
+  }
+
+  function selectHistory(term) {
+    addToHistory(term)
+    navigate(`/search?q=${encodeURIComponent(term)}`)
+    setQ('')
+    setShowHistory(false)
   }
 
   const navLink = (to, label) => (
@@ -54,14 +98,49 @@ export default function Navbar() {
         </Link>
 
         {/* Search */}
-        <form onSubmit={handleSearch} className="flex-1 max-w-lg">
-          <input
-            value={q}
-            onChange={e => setQ(e.target.value)}
-            placeholder="Search artists, albums, songs…"
-            className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-full px-4 py-2 focus:outline-none focus:border-violet-500 placeholder-gray-500 transition-colors"
-          />
-        </form>
+        <div className="flex-1 max-w-lg relative" ref={searchRef}>
+          <form onSubmit={handleSearch}>
+            <input
+              value={q}
+              onChange={e => setQ(e.target.value)}
+              onFocus={() => setShowHistory(true)}
+              placeholder="Search artists, albums, songs…"
+              className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-full px-4 py-2 focus:outline-none focus:border-violet-500 placeholder-gray-500 transition-colors"
+            />
+          </form>
+          {showHistory && history.length > 0 && (
+            <div className="absolute top-full mt-2 left-0 right-0 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl py-1 z-50 overflow-hidden">
+              <div className="flex items-center justify-between px-3 py-1.5">
+                <span className="text-xs text-gray-500 font-medium">Recent searches</span>
+                <button
+                  onClick={clearHistory}
+                  className="text-xs text-gray-500 hover:text-red-400 transition-colors"
+                >
+                  Clear all
+                </button>
+              </div>
+              {history.map(term => (
+                <button
+                  key={term}
+                  onClick={() => selectHistory(term)}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors text-left group"
+                >
+                  <svg className="w-3.5 h-3.5 text-gray-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <span className="flex-1 truncate">{term}</span>
+                  <span
+                    role="button"
+                    onClick={e => removeFromHistory(term, e)}
+                    className="text-gray-600 hover:text-gray-300 transition-colors shrink-0 px-1"
+                  >
+                    ✕
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
 
         {/* Nav links */}
         <div className="hidden md:flex items-center gap-5">
