@@ -8,7 +8,13 @@ from sqlalchemy.pool import NullPool
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 load_dotenv(os.path.join(_ROOT, ".env"))
 
-DATABASE_URL = os.environ["DATABASE_URL"]  # required — set in .env
+DATABASE_URL = os.environ.get("DATABASE_URL")
+if not DATABASE_URL:
+    raise RuntimeError(
+        "DATABASE_URL environment variable is not set. "
+        "On Railway: add a PostgreSQL service to your project. "
+        "Locally: set DATABASE_URL in your .env file."
+    )
 
 # Supabase's transaction-mode pooler (port 6543) manages its own connection pool,
 # so SQLAlchemy should not pool on top of it — use NullPool in that case.
