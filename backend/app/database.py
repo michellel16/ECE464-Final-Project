@@ -8,11 +8,13 @@ from sqlalchemy.pool import NullPool
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 load_dotenv(os.path.join(_ROOT, ".env"))
 
-DATABASE_URL = os.environ.get("DATABASE_URL")
+# APP_DATABASE_URL takes priority (use this on Railway to avoid the auto-injected internal URL).
+# Falls back to DATABASE_URL for local dev.
+DATABASE_URL = os.environ.get("APP_DATABASE_URL") or os.environ.get("DATABASE_URL")
 if not DATABASE_URL:
     raise RuntimeError(
         "DATABASE_URL environment variable is not set. "
-        "On Railway: add a PostgreSQL service to your project. "
+        "On Railway: set APP_DATABASE_URL to the public Postgres URL. "
         "Locally: set DATABASE_URL in your .env file."
     )
 
