@@ -25,7 +25,54 @@ def _user_out(user: models.User) -> dict:
         "created_at": user.created_at,
         "follower_count": len(user.followers),
         "following_count": len(user.following),
+        "is_private": user.is_private or False,
     }
+
+
+@router.get("/suggested")
+def suggested_users(
+    limit: int = 6,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """Second-degree connections: users followed by people I follow.
+    Falls back to most-followed users when the current user follows no one."""
+    my_following_ids = {f.followed_id for f in current_user.following}
+    my_following_ids.add(current_user.id)  # always exclude self
+
+    if len(my_following_ids) == 1:
+        # No follows yet — return most-followed users (excluding self)
+        users = (
+            db.query(models.User)
+            .filter(models.User.id != current_user.id)
+            .all()
+        )
+        users.sort(key=lambda u: len(u.followers), reverse=True)
+        return [_user_out(u) for u in users[:limit]]
+
+    # Tally how many mutual follows each candidate has
+    candidate_score: dict[int, int] = {}
+    for followed_id in my_following_ids - {current_user.id}:
+        followed_user = db.query(models.User).get(followed_id)
+        if not followed_user:
+            continue
+        for their_follow in followed_user.following:
+            uid = their_follow.followed_id
+            if uid not in my_following_ids:
+                candidate_score[uid] = candidate_score.get(uid, 0) + 1
+
+    if not candidate_score:
+        return []
+
+    top_ids = sorted(candidate_score, key=lambda x: candidate_score[x], reverse=True)[:limit]
+    result = []
+    for uid in top_ids:
+        u = db.query(models.User).get(uid)
+        if u:
+            out = _user_out(u)
+            out["mutual_follows"] = candidate_score[uid]
+            result.append(out)
+    return result
 
 
 @router.get("/{username}")
@@ -58,6 +105,8 @@ def update_profile(
         current_user.bio = update.bio
     if update.avatar_url is not None:
         current_user.avatar_url = update.avatar_url
+    if update.is_private is not None:
+        current_user.is_private = update.is_private
     db.commit()
     db.refresh(current_user)
     current_user.follower_count = len(current_user.followers)
@@ -106,11 +155,22 @@ def follow_user(
     if target.id == current_user.id:
         raise HTTPException(status_code=400, detail="Cannot follow yourself")
 
-    exists = db.query(models.UserFollow).filter_by(
+    already = db.query(models.UserFollow).filter_by(
         follower_id=current_user.id, followed_id=target.id
     ).first()
-    if exists:
+    if already:
         raise HTTPException(status_code=400, detail="Already following")
+
+    if target.is_private:
+        # Check for existing pending request
+        existing_req = db.query(models.FollowRequest).filter_by(
+            requester_id=current_user.id, target_id=target.id
+        ).first()
+        if existing_req:
+            raise HTTPException(status_code=400, detail="Follow request already sent")
+        db.add(models.FollowRequest(requester_id=current_user.id, target_id=target.id))
+        db.commit()
+        return {"message": "Follow request sent", "requested": True}
 
     db.add(models.UserFollow(follower_id=current_user.id, followed_id=target.id))
     db.add(models.Activity(
@@ -118,7 +178,7 @@ def follow_user(
         target_type="user", target_id=target.id,
     ))
     db.commit()
-    return {"message": f"Now following {username}"}
+    return {"message": f"Now following {username}", "requested": False}
 
 
 @router.delete("/{username}/follow")
@@ -130,6 +190,15 @@ def unfollow_user(
     target = db.query(models.User).filter(models.User.username == username).first()
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
+
+    # Cancel a pending request if one exists
+    pending = db.query(models.FollowRequest).filter_by(
+        requester_id=current_user.id, target_id=target.id
+    ).first()
+    if pending:
+        db.delete(pending)
+        db.commit()
+        return {"message": "Follow request cancelled"}
 
     follow = db.query(models.UserFollow).filter_by(
         follower_id=current_user.id, followed_id=target.id
@@ -154,7 +223,71 @@ def follow_status(
     following = db.query(models.UserFollow).filter_by(
         follower_id=current_user.id, followed_id=target.id
     ).first() is not None
-    return {"following": following}
+    requested = (not following) and db.query(models.FollowRequest).filter_by(
+        requester_id=current_user.id, target_id=target.id
+    ).first() is not None
+    return {"following": following, "requested": requested}
+
+
+@router.get("/me/follow-requests")
+def get_follow_requests(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    requests = (
+        db.query(models.FollowRequest)
+        .filter_by(target_id=current_user.id)
+        .order_by(models.FollowRequest.created_at.desc())
+        .all()
+    )
+    return [
+        {
+            "id": r.id,
+            "requester_username": r.requester.username,
+            "requester_avatar_url": r.requester.avatar_url,
+            "created_at": r.created_at,
+        }
+        for r in requests
+    ]
+
+
+@router.post("/me/follow-requests/{request_id}/accept")
+def accept_follow_request(
+    request_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    req = db.query(models.FollowRequest).filter_by(
+        id=request_id, target_id=current_user.id
+    ).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Request not found")
+
+    db.add(models.UserFollow(follower_id=req.requester_id, followed_id=current_user.id))
+    db.add(models.Activity(
+        user_id=req.requester_id, action_type="followed",
+        target_type="user", target_id=current_user.id,
+    ))
+    db.delete(req)
+    db.commit()
+    return {"message": "Request accepted"}
+
+
+@router.post("/me/follow-requests/{request_id}/reject")
+def reject_follow_request(
+    request_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    req = db.query(models.FollowRequest).filter_by(
+        id=request_id, target_id=current_user.id
+    ).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Request not found")
+
+    db.delete(req)
+    db.commit()
+    return {"message": "Request rejected"}
 
 
 @router.get("/{username}/followers")

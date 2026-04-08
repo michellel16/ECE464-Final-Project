@@ -4,6 +4,7 @@ import axios from 'axios'
 import { useAuth } from '../contexts/AuthContext'
 import StarRating from '../components/StarRating'
 import ReviewList from '../components/ReviewList'
+import RecommendModal from '../components/RecommendModal'
 
 const STATUS_LABELS = {
   listened:        { label: 'Listened',        emoji: '✓' },
@@ -25,6 +26,7 @@ export default function AlbumPage() {
   const [addingList, setAddingList] = useState(false)
   const [myLists, setMyLists]   = useState([])
   const [playingId, setPlayingId] = useState(null)
+  const [showRecommend, setShowRecommend] = useState(false)
   const audioRef = useRef(null)
 
   useEffect(() => {
@@ -162,6 +164,12 @@ export default function AlbumPage() {
               >
                 ✏ {myReview ? 'Edit Review' : 'Write Review'}
               </button>
+              <button
+                onClick={() => setShowRecommend(true)}
+                className="px-4 py-1.5 rounded-full text-sm font-medium border border-gray-700 text-gray-400 hover:border-violet-600 hover:text-violet-400 transition-colors"
+              >
+                ↗ Recommend
+              </button>
               <div className="relative">
                 <button
                   onClick={() => setAddingList(!addingList)}
@@ -219,6 +227,14 @@ export default function AlbumPage() {
       {/* Description */}
       {album.description && (
         <div className="text-gray-400 text-sm leading-relaxed mb-8 max-w-2xl">{album.description}</div>
+      )}
+
+      {showRecommend && (
+        <RecommendModal
+          albumId={parseInt(id)}
+          title={album.title}
+          onClose={() => setShowRecommend(false)}
+        />
       )}
 
       <div className="grid lg:grid-cols-3 gap-8">

@@ -1,9 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import axios from 'axios'
 import { useAuth } from '../contexts/AuthContext'
 import AlbumCard from '../components/AlbumCard'
-import { Avatar } from '../components/Navbar'
 
 export default function Home() {
   const { user } = useAuth()
@@ -13,15 +12,17 @@ export default function Home() {
   const [feed, setFeed]                         = useState([])
   const [recommended, setRecommended]           = useState([])
   const [recommendedArtists, setRecArtists]     = useState([])
+  const [suggested, setSuggested]               = useState([])
   const [loading, setLoading]                   = useState(true)
 
-  useEffect(() => {
+  const fetchData = useCallback(() => {
+    setLoading(true)
     const fetches = [
-      axios.get('/api/music/albums?limit=12'),
-      axios.get('/api/music/artists?limit=12'),
-      axios.get('/api/music/songs?limit=6'),
+      axios.get('/api/music/albums?limit=12&sort=recently_reviewed'),
+      axios.get('/api/music/artists?limit=12&sort=recently_reviewed'),
+      axios.get('/api/music/songs?limit=6&sort=recently_reviewed'),
     ]
-    if (user) fetches.push(axios.get('/api/social/feed?limit=15'))
+    if (user) fetches.push(axios.get(`/api/users/${user.username}/activity?limit=15`))
 
     Promise.all(fetches).then(([albumsRes, artistsRes, songsRes, feedRes]) => {
       setAlbums(albumsRes.data)
@@ -34,8 +35,24 @@ export default function Home() {
       axios.get('/api/music/recommended?song_limit=8')
         .then(r => { setRecommended(r.data.songs); setRecArtists(r.data.artists) })
         .catch(() => {})
+      axios.get('/api/users/suggested?limit=5')
+        .then(r => setSuggested(r.data))
+        .catch(() => {})
     }
   }, [user])
+
+  useEffect(() => {
+    fetchData()
+  }, [fetchData])
+
+  // Refetch when the browser restores this page from the back-forward cache
+  useEffect(() => {
+    function onPageShow(e) {
+      if (e.persisted) fetchData()
+    }
+    window.addEventListener('pageshow', onPageShow)
+    return () => window.removeEventListener('pageshow', onPageShow)
+  }, [fetchData])
 
   if (loading) return <PageLoader />
 
@@ -65,7 +82,7 @@ export default function Home() {
 
       {/* Artists */}
       <section>
-        <SectionHeader title="Artists" href="/discover?tab=artists" />
+        <SectionHeader title="Recently Reviewed Artists" href="/discover?tab=artists" />
         <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-4">
           {artists.map(a => <ArtistCard key={a.id} artist={a} />)}
         </div>
@@ -73,7 +90,7 @@ export default function Home() {
 
       {/* Albums */}
       <section>
-        <SectionHeader title="Albums" href="/discover?tab=albums" />
+        <SectionHeader title="Recently Reviewed Albums" href="/discover?tab=albums" />
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
           {albums.map(a => <AlbumCard key={a.id} album={a} />)}
         </div>
@@ -81,7 +98,7 @@ export default function Home() {
 
       {/* Songs */}
       <section>
-        <SectionHeader title="Songs" href="/discover?tab=songs" />
+        <SectionHeader title="Recently Reviewed Songs" href="/discover?tab=songs" />
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {songs.map(s => <SongRow key={s.id} song={s} />)}
         </div>
@@ -115,14 +132,24 @@ export default function Home() {
         </section>
       )}
 
+      {/* Suggested users */}
+      {user && suggested.length > 0 && (
+        <section>
+          <SectionHeader title="People to Follow" />
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {suggested.map(u => <SuggestedUserCard key={u.id} user={u} />)}
+          </div>
+        </section>
+      )}
+
       {/* Activity feed */}
       {user && (
         <section>
-          <h2 className="text-xl font-bold text-white mb-5">Activity Feed</h2>
+          <h2 className="text-xl font-bold text-white mb-5">Your Activity</h2>
           {feed.length === 0 ? (
             <div className="card p-10 text-center text-gray-500">
-              <p className="mb-2">Nothing here yet.</p>
-              <p><Link to="/search" className="link-purple">Find users to follow →</Link></p>
+              <p className="mb-2">No activity yet.</p>
+              <p><Link to="/discover" className="link-purple">Start exploring music →</Link></p>
             </div>
           ) : (
             <div className="space-y-3">
@@ -218,14 +245,59 @@ function RecommendedSongRow({ song }) {
   )
 }
 
+function SuggestedUserCard({ user: u }) {
+  const [following, setFollowing] = useState(false)
+  const [loading, setLoading] = useState(false)
+
+  async function follow() {
+    if (loading || following) return
+    setLoading(true)
+    try {
+      await axios.post(`/api/users/${u.username}/follow`)
+      setFollowing(true)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="card p-4 flex items-center gap-3">
+      <Link to={`/users/${u.username}`}>
+        <Avatar username={u.username} avatarUrl={u.avatar_url} size={10} />
+      </Link>
+      <div className="flex-1 min-w-0">
+        <Link to={`/users/${u.username}`} className="font-medium text-white hover:text-violet-400 transition-colors text-sm">
+          {u.username}
+        </Link>
+        <p className="text-gray-500 text-xs">
+          {u.mutual_follows
+            ? `${u.mutual_follows} mutual follow${u.mutual_follows !== 1 ? 's' : ''}`
+            : `${u.follower_count ?? 0} follower${u.follower_count !== 1 ? 's' : ''}`}
+        </p>
+      </div>
+      <button
+        onClick={follow}
+        disabled={loading || following}
+        className={`text-xs px-3 py-1.5 rounded-full font-medium transition-colors ${
+          following
+            ? 'bg-gray-700 text-gray-400'
+            : 'btn-primary'
+        }`}
+      >
+        {loading ? '…' : following ? 'Following' : 'Follow'}
+      </button>
+    </div>
+  )
+}
+
 function ActivityItem({ item }) {
   const actionLabel = {
-    reviewed_album:              'reviewed',
-    reviewed_song:               'reviewed',
-    marked_album_listened:       'listened to',
-    marked_album_want_to_listen: 'wants to listen to',
-    marked_album_favorites:      'favorited',
-    followed:                    'followed',
+    reviewed_album:              'Reviewed',
+    reviewed_song:               'Reviewed',
+    marked_album_listened:       'Listened to',
+    marked_album_want_to_listen: 'Want to listen to',
+    marked_album_favorites:      'Favorited',
+    followed:                    'Followed',
   }[item.action_type] ?? item.action_type
 
   const targetLink = item.target_type === 'album' ? `/albums/${item.target_id}`
@@ -234,29 +306,27 @@ function ActivityItem({ item }) {
     : null
 
   return (
-    <div className="card p-4 flex items-start gap-3">
-      <Link to={`/users/${item.username}`}>
-        <Avatar username={item.username} avatarUrl={item.avatar_url} size={9} />
-      </Link>
+    <div className="card p-4 flex items-center gap-4">
+      {item.target_cover ? (
+        <Link to={targetLink ?? '#'} className="shrink-0">
+          <img src={item.target_cover} alt="" className="w-12 h-12 rounded object-cover" loading="lazy" />
+        </Link>
+      ) : (
+        <div className="w-12 h-12 rounded bg-gray-800 flex items-center justify-center text-gray-500 shrink-0 text-xl">
+          {item.target_type === 'user' ? '👤' : '🎵'}
+        </div>
+      )}
       <div className="flex-1 min-w-0">
         <p className="text-sm">
-          <Link to={`/users/${item.username}`} className="font-medium text-white hover:text-violet-400">{item.username}</Link>
-          {' '}<span className="text-gray-400">{actionLabel}</span>
-          {item.target_name && (
-            <>{' '}{targetLink
-              ? <Link to={targetLink} className="font-medium text-white hover:text-violet-400">{item.target_name}</Link>
-              : <span className="font-medium text-white">{item.target_name}</span>}
-              {item.target_artist && <span className="text-gray-500"> by {item.target_artist}</span>}
-            </>
+          <span className="text-gray-400">{actionLabel} </span>
+          {item.target_name && (targetLink
+            ? <Link to={targetLink} className="font-medium text-white hover:text-violet-400">{item.target_name}</Link>
+            : <span className="font-medium text-white">{item.target_name}</span>
           )}
+          {item.target_artist && <span className="text-gray-500"> · {item.target_artist}</span>}
         </p>
         <p className="text-gray-600 text-xs mt-0.5">{new Date(item.created_at).toLocaleDateString()}</p>
       </div>
-      {item.target_cover && (
-        <Link to={targetLink ?? '#'}>
-          <img src={item.target_cover} alt="" className="w-12 h-12 rounded object-cover shrink-0" loading="lazy" />
-        </Link>
-      )}
     </div>
   )
 }

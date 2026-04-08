@@ -4,9 +4,11 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
 from typing import List
 
+from typing import Optional
+
 from .. import models, schemas
 from ..database import get_db
-from ..auth import get_current_user
+from ..auth import get_current_user, get_current_user_optional
 from .search import _enrich_missing_images
 
 router = APIRouter(prefix="/api/music", tags=["music"])
@@ -225,12 +227,40 @@ def get_genres(db: Session = Depends(get_db)):
 # ── Artists ───────────────────────────────────────────────────────────────────
 
 @router.get("/artists")
-def list_artists(skip: int = 0, limit: int = 50, db: Session = Depends(get_db)):
-    artists = (
-        db.query(models.Artist)
-        .options(joinedload(models.Artist.genres))
-        .offset(skip).limit(limit).all()
-    )
+def list_artists(skip: int = 0, limit: int = 50, sort: Optional[str] = None, db: Session = Depends(get_db)):
+    if sort == 'recently_reviewed':
+        album_latest = (
+            db.query(models.Album.artist_id, func.max(models.Review.created_at).label('latest'))
+            .join(models.Review, models.Review.album_id == models.Album.id)
+            .group_by(models.Album.artist_id)
+            .subquery()
+        )
+        song_latest = (
+            db.query(models.Song.artist_id, func.max(models.Review.created_at).label('latest'))
+            .join(models.Review, models.Review.song_id == models.Song.id)
+            .group_by(models.Song.artist_id)
+            .subquery()
+        )
+        ordered_ids = [row[0] for row in (
+            db.query(models.Artist.id)
+            .outerjoin(album_latest, album_latest.c.artist_id == models.Artist.id)
+            .outerjoin(song_latest, song_latest.c.artist_id == models.Artist.id)
+            .order_by(func.greatest(album_latest.c.latest, song_latest.c.latest).desc().nullslast())
+            .limit(limit).all()
+        )]
+        id_map = {a.id: a for a in (
+            db.query(models.Artist)
+            .options(joinedload(models.Artist.genres))
+            .filter(models.Artist.id.in_(ordered_ids))
+            .all()
+        )}
+        artists = [id_map[i] for i in ordered_ids if i in id_map]
+    else:
+        artists = (
+            db.query(models.Artist)
+            .options(joinedload(models.Artist.genres))
+            .offset(skip).limit(limit).all()
+        )
     artist_ids = [a.id for a in artists]
     album_counts = dict(
         db.query(models.Album.artist_id, func.count(models.Album.id))
@@ -500,15 +530,33 @@ def get_artist_albums(artist_id: int, db: Session = Depends(get_db)):
 # ── Albums ────────────────────────────────────────────────────────────────────
 
 @router.get("/albums")
-def list_albums(skip: int = 0, limit: int = 30, db: Session = Depends(get_db)):
-    albums = (
-        db.query(models.Album)
-        .options(
-            joinedload(models.Album.artist),
-            joinedload(models.Album.genres),
+def list_albums(skip: int = 0, limit: int = 30, sort: Optional[str] = None, db: Session = Depends(get_db)):
+    if sort == 'recently_reviewed':
+        latest_review = (
+            db.query(models.Review.album_id, func.max(models.Review.created_at).label('latest'))
+            .filter(models.Review.album_id.isnot(None))
+            .group_by(models.Review.album_id)
+            .subquery()
         )
-        .offset(skip).limit(limit).all()
-    )
+        ordered_ids = [row[0] for row in (
+            db.query(models.Album.id)
+            .outerjoin(latest_review, latest_review.c.album_id == models.Album.id)
+            .order_by(latest_review.c.latest.desc().nullslast())
+            .limit(limit).all()
+        )]
+        id_map = {al.id: al for al in (
+            db.query(models.Album)
+            .options(joinedload(models.Album.artist), joinedload(models.Album.genres))
+            .filter(models.Album.id.in_(ordered_ids))
+            .all()
+        )}
+        albums = [id_map[i] for i in ordered_ids if i in id_map]
+    else:
+        albums = (
+            db.query(models.Album)
+            .options(joinedload(models.Album.artist), joinedload(models.Album.genres))
+            .offset(skip).limit(limit).all()
+        )
     album_ids = [al.id for al in albums]
     avg_map, count_map, _ = _batch_album_stats(db, album_ids)
     return [
@@ -577,15 +625,33 @@ async def get_album(album_id: int, db: Session = Depends(get_db)):
 # ── Songs ─────────────────────────────────────────────────────────────────────
 
 @router.get("/songs")
-def list_songs(skip: int = 0, limit: int = 50, db: Session = Depends(get_db)):
-    songs = (
-        db.query(models.Song)
-        .options(
-            joinedload(models.Song.artist),
-            joinedload(models.Song.album),
+def list_songs(skip: int = 0, limit: int = 50, sort: Optional[str] = None, db: Session = Depends(get_db)):
+    if sort == 'recently_reviewed':
+        latest_review = (
+            db.query(models.Review.song_id, func.max(models.Review.created_at).label('latest'))
+            .filter(models.Review.song_id.isnot(None))
+            .group_by(models.Review.song_id)
+            .subquery()
         )
-        .offset(skip).limit(limit).all()
-    )
+        ordered_ids = [row[0] for row in (
+            db.query(models.Song.id)
+            .outerjoin(latest_review, latest_review.c.song_id == models.Song.id)
+            .order_by(latest_review.c.latest.desc().nullslast())
+            .limit(limit).all()
+        )]
+        id_map = {s.id: s for s in (
+            db.query(models.Song)
+            .options(joinedload(models.Song.artist), joinedload(models.Song.album))
+            .filter(models.Song.id.in_(ordered_ids))
+            .all()
+        )}
+        songs = [id_map[i] for i in ordered_ids if i in id_map]
+    else:
+        songs = (
+            db.query(models.Song)
+            .options(joinedload(models.Song.artist), joinedload(models.Song.album))
+            .offset(skip).limit(limit).all()
+        )
     song_ids = [s.id for s in songs]
     avg_map: dict[int, float] = {}
     if song_ids:
@@ -757,24 +823,59 @@ def get_song(song_id: int, db: Session = Depends(get_db)):
 
 # ── Reviews ───────────────────────────────────────────────────────────────────
 
-def _review_row(r: models.Review) -> dict:
+def _review_row(r: models.Review, like_count: int = 0, liked_by_me: bool = False) -> dict:
     return {
         "id": r.id, "user_id": r.user_id, "username": r.user.username,
         "avatar_url": r.user.avatar_url,
         "song_id": r.song_id, "album_id": r.album_id,
         "text": r.text, "rating": r.rating, "created_at": r.created_at,
+        "like_count": like_count,
+        "liked_by_me": liked_by_me,
     }
 
 
+def _enrich_reviews(
+    rows: list, db: Session, current_user: Optional[models.User] = None
+) -> list:
+    if not rows:
+        return []
+    review_ids = [r.id for r in rows]
+    like_counts = dict(
+        db.query(models.ReviewLike.review_id, func.count())
+        .filter(models.ReviewLike.review_id.in_(review_ids))
+        .group_by(models.ReviewLike.review_id)
+        .all()
+    )
+    liked_set: set[int] = set()
+    if current_user:
+        liked_set = {
+            row[0] for row in
+            db.query(models.ReviewLike.review_id)
+            .filter(
+                models.ReviewLike.review_id.in_(review_ids),
+                models.ReviewLike.user_id == current_user.id,
+            )
+            .all()
+        }
+    return [
+        _review_row(r, like_count=like_counts.get(r.id, 0), liked_by_me=r.id in liked_set)
+        for r in rows
+    ]
+
+
 @router.get("/albums/{album_id}/reviews")
-def get_album_reviews(album_id: int, skip: int = 0, limit: int = 20, db: Session = Depends(get_db)):
+def get_album_reviews(
+    album_id: int, skip: int = 0, limit: int = 20,
+    db: Session = Depends(get_db),
+    current_user: Optional[models.User] = Depends(get_current_user_optional),
+):
     rows = (
         db.query(models.Review)
         .filter(models.Review.album_id == album_id)
         .order_by(models.Review.created_at.desc())
         .offset(skip).limit(limit).all()
     )
-    return [_review_row(r) for r in rows]
+    return _enrich_reviews(rows, db, current_user)
 
 
 @router.post("/albums/{album_id}/reviews", status_code=201)
@@ -813,14 +914,18 @@ def create_album_review(
 
 
 @router.get("/songs/{song_id}/reviews")
-def get_song_reviews(song_id: int, skip: int = 0, limit: int = 20, db: Session = Depends(get_db)):
+def get_song_reviews(
+    song_id: int, skip: int = 0, limit: int = 20,
+    db: Session = Depends(get_db),
+    current_user: Optional[models.User] = Depends(get_current_user_optional),
+):
     rows = (
         db.query(models.Review)
         .filter(models.Review.song_id == song_id)
         .order_by(models.Review.created_at.desc())
         .offset(skip).limit(limit).all()
     )
-    return [_review_row(r) for r in rows]
+    return _enrich_reviews(rows, db, current_user)
 
 
 @router.post("/songs/{song_id}/reviews", status_code=201)
@@ -870,6 +975,37 @@ def my_album_review(album_id: int, db: Session = Depends(get_db), current_user: 
 def my_song_review(song_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     r = db.query(models.Review).filter_by(user_id=current_user.id, song_id=song_id).first()
     return {"review": _review_row(r) if r else None}
+
+
+# ── Review likes ─────────────────────────────────────────────────────────────
+
+@router.post("/reviews/{review_id}/like")
+def toggle_review_like(
+    review_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    review = db.query(models.Review).filter(models.Review.id == review_id).first()
+    if not review:
+        raise HTTPException(status_code=404, detail="Review not found")
+
+    existing = db.query(models.ReviewLike).filter_by(
+        user_id=current_user.id, review_id=review_id
+    ).first()
+    if existing:
+        db.delete(existing)
+        liked = False
+    else:
+        db.add(models.ReviewLike(user_id=current_user.id, review_id=review_id))
+        liked = True
+    db.commit()
+
+    count = (
+        db.query(func.count(models.ReviewLike.review_id))
+        .filter_by(review_id=review_id)
+        .scalar() or 0
+    )
+    return {"liked": liked, "like_count": count}
 
 
 # ── Status ────────────────────────────────────────────────────────────────────

@@ -15,6 +15,7 @@ export default function Profile() {
   const [reviews, setReviews]     = useState([])
   const [lists, setLists]         = useState([])
   const [isFollowing, setFollowing] = useState(false)
+  const [isRequested, setRequested] = useState(false)
   const [tab, setTab]             = useState('reviews')
   const [loading, setLoading]     = useState(true)
   const [followLoading, setFL]    = useState(false)
@@ -41,7 +42,10 @@ export default function Profile() {
       setProfile(pRes.data)
       setReviews(rRes.data)
       setLists(lRes.data)
-      if (fsRes) setFollowing(fsRes.data.following)
+      if (fsRes) {
+        setFollowing(fsRes.data.following)
+        setRequested(fsRes.data.requested ?? false)
+      }
     }).finally(() => setLoading(false))
   }, [username, me])
 
@@ -89,14 +93,19 @@ export default function Profile() {
     if (!me || isMe) return
     setFL(true)
     try {
-      if (isFollowing) {
+      if (isFollowing || isRequested) {
         await axios.delete(`/api/users/${username}/follow`)
         setFollowing(false)
-        setProfile(p => ({ ...p, follower_count: (p.follower_count ?? 1) - 1 }))
+        setRequested(false)
+        if (isFollowing) setProfile(p => ({ ...p, follower_count: (p.follower_count ?? 1) - 1 }))
       } else {
-        await axios.post(`/api/users/${username}/follow`)
-        setFollowing(true)
-        setProfile(p => ({ ...p, follower_count: (p.follower_count ?? 0) + 1 }))
+        const { data } = await axios.post(`/api/users/${username}/follow`)
+        if (data.requested) {
+          setRequested(true)
+        } else {
+          setFollowing(true)
+          setProfile(p => ({ ...p, follower_count: (p.follower_count ?? 0) + 1 }))
+        }
       }
     } finally {
       setFL(false)
@@ -122,7 +131,12 @@ export default function Profile() {
         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-5">
           <Avatar username={profile.username} avatarUrl={profile.avatar_url} size={20} className="ring-4 ring-violet-700/40" />
           <div className="flex-1 min-w-0">
-            <h1 className="text-2xl font-bold text-white">{profile.username}</h1>
+            <h1 className="text-2xl font-bold text-white flex items-center gap-2">
+              {profile.username}
+              {profile.is_private && (
+                <span title="Private account" className="text-gray-500 text-base">🔒</span>
+              )}
+            </h1>
             {profile.bio && <p className="text-gray-400 mt-1 text-sm">{profile.bio}</p>}
             <div className="flex gap-5 mt-3 text-sm text-gray-400">
               <button onClick={() => setFollowModal('followers')} className="hover:text-white transition-colors">
@@ -141,10 +155,12 @@ export default function Profile() {
               className={`px-6 py-2 rounded-full text-sm font-medium transition-colors disabled:opacity-60 ${
                 isFollowing
                   ? 'bg-gray-700 text-white hover:bg-red-900/60 hover:text-red-300'
+                  : isRequested
+                  ? 'bg-gray-700 text-gray-300 hover:bg-red-900/60 hover:text-red-300'
                   : 'btn-primary'
               }`}
             >
-              {followLoading ? '…' : isFollowing ? 'Following' : 'Follow'}
+              {followLoading ? '…' : isFollowing ? 'Following' : isRequested ? 'Requested' : 'Follow'}
             </button>
           )}
           {isMe && (
@@ -202,8 +218,15 @@ export default function Profile() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 bg-gray-900 rounded-xl p-1 w-fit mb-6">
-        {['reviews', 'lists', ...(isMe && spotifyStatus?.connected ? ['spotify playlists'] : [])].map(t => (
+      <div className="flex flex-wrap gap-1 bg-gray-900 rounded-xl p-1 w-fit mb-6">
+        {[
+          'reviews',
+          'lists',
+          'activity',
+          ...(isMe ? ['recs'] : []),
+          ...(isMe && profile?.is_private ? ['requests'] : []),
+          ...(isMe && spotifyStatus?.connected ? ['spotify playlists'] : []),
+        ].map(t => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -216,6 +239,10 @@ export default function Profile() {
                 <SpotifyIcon className="w-3.5 h-3.5 text-green-400" />
                 Playlists
               </span>
+            ) : t === 'recs' ? (
+              <RecsTabLabel />
+            ) : t === 'requests' ? (
+              <FollowRequestsTabLabel />
             ) : t}
           </button>
         ))}
@@ -233,6 +260,18 @@ export default function Profile() {
 
       {tab === 'lists' && (
         <ListsTab lists={lists} isMe={isMe} />
+      )}
+
+      {tab === 'activity' && (
+        <ActivityTab username={profile.username} />
+      )}
+
+      {tab === 'requests' && isMe && (
+        <FollowRequestsTab />
+      )}
+
+      {tab === 'recs' && isMe && (
+        <RecsTab />
       )}
 
       {tab === 'spotify playlists' && isMe && spotifyStatus?.connected && (
@@ -276,6 +315,310 @@ export default function Profile() {
           onClose={() => setFollowModal(null)}
         />
       )}
+    </div>
+  )
+}
+
+// ── Activity Tab ─────────────────────────────────────────────────────────────
+
+const ACTION_LABELS = {
+  reviewed_album:              'reviewed',
+  reviewed_song:               'reviewed',
+  marked_album_listened:       'listened to',
+  marked_album_want_to_listen: 'wants to listen to',
+  marked_album_favorites:      'added to favorites',
+  followed:                    'followed',
+}
+
+function ActivityTab({ username }) {
+  const [activities, setActivities] = useState(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    setLoading(true)
+    axios.get(`/api/users/${username}/activity?limit=30`)
+      .then(r => setActivities(r.data))
+      .finally(() => setLoading(false))
+  }, [username])
+
+  if (loading) return (
+    <div className="flex justify-center py-10">
+      <div className="w-8 h-8 border-4 border-violet-600 border-t-transparent rounded-full animate-spin" />
+    </div>
+  )
+
+  if (!activities || activities.length === 0) {
+    return (
+      <div className="card p-8 text-center text-gray-500">No recent activity.</div>
+    )
+  }
+
+  return (
+    <div className="space-y-2">
+      {activities.map(a => <ActivityItem key={a.id} activity={a} />)}
+    </div>
+  )
+}
+
+function ActivityItem({ activity: a }) {
+  const label = ACTION_LABELS[a.action_type] ?? a.action_type.replace(/_/g, ' ')
+  const hasTarget = a.target_name && a.target_url
+  const isReview = a.action_type.startsWith('reviewed_')
+  const meta = a.meta ? (typeof a.meta === 'string' ? JSON.parse(a.meta) : a.meta) : null
+
+  return (
+    <div className="card p-4 flex items-center gap-4">
+      {a.target_cover ? (
+        hasTarget ? (
+          <Link to={a.target_url} className="shrink-0">
+            <img src={a.target_cover} alt="" className="w-12 h-12 rounded object-cover" loading="lazy" />
+          </Link>
+        ) : (
+          <img src={a.target_cover} alt="" className="w-12 h-12 rounded object-cover shrink-0" loading="lazy" />
+        )
+      ) : (
+        <div className="w-12 h-12 rounded bg-gray-800 flex items-center justify-center text-gray-500 shrink-0 text-xl">
+          {a.target_type === 'user' ? '👤' : '🎵'}
+        </div>
+      )}
+
+      <div className="flex-1 min-w-0">
+        <p className="text-sm text-gray-400">
+          <span className="text-gray-300">{label} </span>
+          {hasTarget ? (
+            <Link to={a.target_url} className="text-white font-medium hover:text-violet-400 transition-colors">
+              {a.target_name}
+            </Link>
+          ) : (
+            <span className="text-white font-medium">{a.target_name}</span>
+          )}
+          {a.target_artist && (
+            <span className="text-gray-500"> · {a.target_artist}</span>
+          )}
+        </p>
+        {isReview && meta?.rating && (
+          <p className="text-yellow-500 text-xs mt-0.5">{'★'.repeat(Math.round(meta.rating))} {meta.rating}</p>
+        )}
+        <p className="text-gray-600 text-xs mt-0.5">{new Date(a.created_at).toLocaleDateString()}</p>
+      </div>
+    </div>
+  )
+}
+
+// ── Follow Requests Tab ───────────────────────────────────────────────────────
+
+function FollowRequestsTabLabel() {
+  const [count, setCount] = useState(0)
+  useEffect(() => {
+    axios.get('/api/users/me/follow-requests')
+      .then(r => setCount(r.data.length))
+      .catch(() => {})
+  }, [])
+  return (
+    <span className="flex items-center gap-1.5">
+      Requests
+      {count > 0 && (
+        <span className="bg-violet-500 text-white text-xs font-bold rounded-full w-4 h-4 flex items-center justify-center leading-none">
+          {count > 9 ? '9+' : count}
+        </span>
+      )}
+    </span>
+  )
+}
+
+function FollowRequestsTab() {
+  const [requests, setRequests] = useState(null)
+  const [loading, setLoading]   = useState(true)
+
+  useEffect(() => {
+    axios.get('/api/users/me/follow-requests')
+      .then(r => setRequests(r.data))
+      .finally(() => setLoading(false))
+  }, [])
+
+  async function accept(id) {
+    await axios.post(`/api/users/me/follow-requests/${id}/accept`)
+    setRequests(prev => prev.filter(r => r.id !== id))
+  }
+
+  async function reject(id) {
+    await axios.post(`/api/users/me/follow-requests/${id}/reject`)
+    setRequests(prev => prev.filter(r => r.id !== id))
+  }
+
+  if (loading) return (
+    <div className="flex justify-center py-10">
+      <div className="w-8 h-8 border-4 border-violet-600 border-t-transparent rounded-full animate-spin" />
+    </div>
+  )
+
+  if (!requests || requests.length === 0) {
+    return (
+      <div className="card p-8 text-center text-gray-500">No pending follow requests.</div>
+    )
+  }
+
+  return (
+    <div className="space-y-2">
+      {requests.map(req => (
+        <div key={req.id} className="card p-4 flex items-center gap-4">
+          <Avatar username={req.requester_username} avatarUrl={req.requester_avatar_url} size={10} />
+          <div className="flex-1 min-w-0">
+            <Link to={`/users/${req.requester_username}`} className="text-white font-medium hover:text-violet-400 transition-colors">
+              {req.requester_username}
+            </Link>
+            <p className="text-gray-500 text-xs mt-0.5">{new Date(req.created_at).toLocaleDateString()}</p>
+          </div>
+          <div className="flex gap-2 shrink-0">
+            <button
+              onClick={() => accept(req.id)}
+              className="px-4 py-1.5 rounded-full text-sm font-medium bg-violet-600 hover:bg-violet-500 text-white transition-colors"
+            >
+              Accept
+            </button>
+            <button
+              onClick={() => reject(req.id)}
+              className="px-4 py-1.5 rounded-full text-sm font-medium border border-gray-700 text-gray-400 hover:border-red-700 hover:text-red-400 transition-colors"
+            >
+              Decline
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ── Recs Tab ─────────────────────────────────────────────────────────────────
+
+function RecsTabLabel() {
+  const [unread, setUnread] = useState(0)
+  useEffect(() => {
+    axios.get('/api/social/recommendations/unread-count')
+      .then(r => setUnread(r.data.count))
+      .catch(() => {})
+  }, [])
+  return (
+    <span className="flex items-center gap-1.5">
+      Recs
+      {unread > 0 && (
+        <span className="bg-pink-500 text-white text-xs font-bold rounded-full w-4 h-4 flex items-center justify-center leading-none">
+          {unread > 9 ? '9+' : unread}
+        </span>
+      )}
+    </span>
+  )
+}
+
+function RecsTab() {
+  const [recs, setRecs]   = useState(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    axios.get('/api/social/recommendations')
+      .then(r => setRecs(r.data))
+      .finally(() => setLoading(false))
+  }, [])
+
+  async function markAllRead() {
+    await axios.post('/api/social/recommendations/read-all')
+    setRecs(prev => prev?.map(r => ({ ...r, is_read: true })))
+  }
+
+  async function markRead(id) {
+    await axios.post(`/api/social/recommendations/${id}/read`)
+    setRecs(prev => prev?.map(r => r.id === id ? { ...r, is_read: true } : r))
+  }
+
+  if (loading) return (
+    <div className="flex justify-center py-10">
+      <div className="w-8 h-8 border-4 border-violet-600 border-t-transparent rounded-full animate-spin" />
+    </div>
+  )
+
+  if (!recs || recs.length === 0) {
+    return (
+      <div className="card p-8 text-center text-gray-500">
+        <p className="text-lg mb-1">No recommendations yet</p>
+        <p className="text-sm">When someone recommends a song or album to you, it'll appear here.</p>
+      </div>
+    )
+  }
+
+  const hasUnread = recs.some(r => !r.is_read)
+
+  return (
+    <div className="space-y-3">
+      {hasUnread && (
+        <div className="flex justify-end">
+          <button onClick={markAllRead} className="text-xs text-gray-500 hover:text-violet-400 transition-colors">
+            Mark all as read
+          </button>
+        </div>
+      )}
+      {recs.map(rec => (
+        <RecCard key={rec.id} rec={rec} onRead={markRead} />
+      ))}
+    </div>
+  )
+}
+
+function RecCard({ rec, onRead }) {
+  const item = rec.song ?? rec.album
+  const itemType = rec.song ? 'song' : 'album'
+  const href = item ? `/${itemType}s/${item.id}` : null
+
+  return (
+    <div className={`card p-4 flex items-start gap-4 transition-colors ${!rec.is_read ? 'border-violet-700/50 bg-violet-950/10' : ''}`}>
+      {/* Cover */}
+      {item?.cover_url ? (
+        <Link to={href} className="shrink-0">
+          <img src={item.cover_url} alt="" className="w-12 h-12 rounded object-cover" loading="lazy" />
+        </Link>
+      ) : (
+        <div className="w-12 h-12 rounded bg-gray-800 flex items-center justify-center text-gray-500 shrink-0 text-xl">
+          {rec.song ? '♪' : '💿'}
+        </div>
+      )}
+
+      <div className="flex-1 min-w-0">
+        {/* Sender */}
+        <p className="text-sm text-gray-400">
+          <Link to={`/users/${rec.sender_username}`} className="font-medium text-white hover:text-violet-400 transition-colors">
+            {rec.sender_username}
+          </Link>
+          {' '}recommended a {itemType}
+        </p>
+
+        {/* Item */}
+        {item && href && (
+          <Link to={href} className="block mt-0.5 hover:text-violet-400 transition-colors">
+            <p className="text-white font-medium text-sm">{item.title}</p>
+            {item.artist && <p className="text-gray-500 text-xs">{item.artist}</p>}
+          </Link>
+        )}
+
+        {/* Note */}
+        {rec.note && (
+          <p className="text-gray-300 text-sm mt-1.5 italic">"{rec.note}"</p>
+        )}
+
+        <p className="text-gray-600 text-xs mt-1">{new Date(rec.created_at).toLocaleDateString()}</p>
+      </div>
+
+      {/* Unread indicator + dismiss */}
+      <div className="flex flex-col items-end gap-2 shrink-0">
+        {!rec.is_read && <span className="w-2 h-2 rounded-full bg-violet-500" />}
+        {!rec.is_read && (
+          <button
+            onClick={() => onRead(rec.id)}
+            className="text-xs text-gray-600 hover:text-gray-400 transition-colors"
+            title="Mark as read"
+          >
+            ✓
+          </button>
+        )}
+      </div>
     </div>
   )
 }
@@ -704,6 +1047,7 @@ function ImportModal({ onClose }) {
 function EditProfileModal({ profile, onClose, onSaved }) {
   const [username, setUsername]     = useState(profile.username)
   const [bio, setBio]               = useState(profile.bio ?? '')
+  const [isPrivate, setIsPrivate]   = useState(profile.is_private ?? false)
   const [saving, setSaving]         = useState(false)
   const [error, setError]           = useState(null)
   const [avatarPreview, setAvatarPreview] = useState(profile.avatar_url ?? null)
@@ -739,8 +1083,9 @@ function EditProfileModal({ profile, onClose, onSaved }) {
       const { data } = await axios.put('/api/users/me/profile', {
         username: trimmed,
         bio: bio.trim() || null,
+        is_private: isPrivate,
       })
-      onSaved({ username: data.username, bio: data.bio, avatar_url: data.avatar_url })
+      onSaved({ username: data.username, bio: data.bio, avatar_url: data.avatar_url, is_private: data.is_private })
     } catch (e) {
       setError(e.response?.data?.detail || 'Save failed')
     } finally {
@@ -811,6 +1156,19 @@ function EditProfileModal({ profile, onClose, onSaved }) {
               placeholder="Tell people a bit about yourself…"
               maxLength={300}
             />
+          </div>
+          <div className="flex items-center justify-between py-1">
+            <div>
+              <p className="text-sm text-white font-medium">Private Account</p>
+              <p className="text-xs text-gray-500 mt-0.5">New followers must be approved by you</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsPrivate(v => !v)}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${isPrivate ? 'bg-violet-600' : 'bg-gray-700'}`}
+            >
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${isPrivate ? 'translate-x-6' : 'translate-x-1'}`} />
+            </button>
           </div>
           {error && <p className="text-red-400 text-sm">{error}</p>}
         </div>

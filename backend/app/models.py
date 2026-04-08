@@ -108,6 +108,7 @@ class User(Base):
     avatar_url      = Column(String, nullable=True)
     created_at      = Column(DateTime, default=datetime.utcnow)
     is_active       = Column(Boolean, default=True)
+    is_private      = Column(Boolean, default=False)
     # Spotify OAuth
     spotify_id                = Column(String(100), nullable=True)
     spotify_access_token      = Column(String,      nullable=True)
@@ -123,6 +124,7 @@ class User(Base):
     album_statuses= relationship("UserAlbumStatus", back_populates="user")
     followers     = relationship("UserFollow", foreign_keys="UserFollow.followed_id",  back_populates="followed")
     following     = relationship("UserFollow", foreign_keys="UserFollow.follower_id",  back_populates="follower")
+    follow_requests_received = relationship("FollowRequest", foreign_keys="FollowRequest.target_id", back_populates="target")
 
 
 # ── Social ──────────────────────────────────────────────────────────────────
@@ -135,6 +137,17 @@ class UserFollow(Base):
 
     follower = relationship("User", foreign_keys=[follower_id], back_populates="following")
     followed = relationship("User", foreign_keys=[followed_id], back_populates="followers")
+
+
+class FollowRequest(Base):
+    __tablename__ = "follow_requests"
+    id           = Column(Integer, primary_key=True, index=True)
+    requester_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    target_id    = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    created_at   = Column(DateTime, default=datetime.utcnow)
+
+    requester = relationship("User", foreign_keys=[requester_id])
+    target    = relationship("User", foreign_keys=[target_id], back_populates="follow_requests_received")
 
 
 class Activity(Base):
@@ -220,3 +233,32 @@ class UserAlbumStatus(Base):
 
     user  = relationship("User",  back_populates="album_statuses")
     album = relationship("Album", back_populates="user_statuses")
+
+
+# ── Social extras ────────────────────────────────────────────────────────────
+
+class ReviewLike(Base):
+    __tablename__ = "review_likes"
+    user_id    = Column(Integer, ForeignKey("users.id",   ondelete="CASCADE"), primary_key=True)
+    review_id  = Column(Integer, ForeignKey("reviews.id", ondelete="CASCADE"), primary_key=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user   = relationship("User",   backref="review_likes")
+    review = relationship("Review", backref="likes")
+
+
+class UserRecommendation(Base):
+    __tablename__ = "user_recommendations"
+    id           = Column(Integer, primary_key=True, index=True)
+    sender_id    = Column(Integer, ForeignKey("users.id",   ondelete="CASCADE"), nullable=False)
+    recipient_id = Column(Integer, ForeignKey("users.id",   ondelete="CASCADE"), nullable=False)
+    song_id      = Column(Integer, ForeignKey("songs.id",   ondelete="SET NULL"), nullable=True)
+    album_id     = Column(Integer, ForeignKey("albums.id",  ondelete="SET NULL"), nullable=True)
+    note         = Column(Text,    nullable=True)
+    is_read      = Column(Boolean, default=False, nullable=False)
+    created_at   = Column(DateTime, default=datetime.utcnow)
+
+    sender    = relationship("User",  foreign_keys=[sender_id],    backref="sent_recommendations")
+    recipient = relationship("User",  foreign_keys=[recipient_id], backref="received_recommendations")
+    song      = relationship("Song")
+    album     = relationship("Album")

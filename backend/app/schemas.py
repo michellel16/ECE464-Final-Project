@@ -92,6 +92,7 @@ class UserUpdate(BaseModel):
     username: Optional[str] = None
     bio: Optional[str] = None
     avatar_url: Optional[str] = None
+    is_private: Optional[bool] = None
 
 
 class User(BaseModel):
@@ -103,6 +104,7 @@ class User(BaseModel):
     created_at: datetime
     follower_count: Optional[int] = None
     following_count: Optional[int] = None
+    is_private: bool = False
     model_config = {"from_attributes": True}
 
 

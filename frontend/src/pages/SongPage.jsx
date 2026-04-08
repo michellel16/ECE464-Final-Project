@@ -4,6 +4,7 @@ import axios from 'axios'
 import { useAuth } from '../contexts/AuthContext'
 import StarRating from '../components/StarRating'
 import ReviewList from '../components/ReviewList'
+import RecommendModal from '../components/RecommendModal'
 
 export default function SongPage() {
   const { id } = useParams()
@@ -17,6 +18,7 @@ export default function SongPage() {
   const [saving, setSaving]     = useState(false)
   const [loading, setLoading]   = useState(true)
   const [showListModal, setShowListModal] = useState(false)
+  const [showRecommend, setShowRecommend] = useState(false)
 
   useEffect(() => {
     const fetches = [
@@ -195,6 +197,12 @@ export default function SongPage() {
           >
             ✏ {myReview ? 'Edit Review' : 'Write Review'}
           </button>
+          <button
+            onClick={() => setShowRecommend(true)}
+            className="px-4 py-1.5 rounded-full text-sm font-medium border border-gray-700 text-gray-400 hover:border-violet-600 hover:text-violet-400 transition-colors"
+          >
+            ↗ Recommend
+          </button>
         </div>
       )}
 
@@ -229,6 +237,13 @@ export default function SongPage() {
 
       {showListModal && (
         <AddToListModal songId={Number(id)} onClose={() => setShowListModal(false)} />
+      )}
+      {showRecommend && (
+        <RecommendModal
+          songId={parseInt(id)}
+          title={song.title}
+          onClose={() => setShowRecommend(false)}
+        />
       )}
     </div>
   )
