@@ -10,6 +10,7 @@ load_dotenv(os.path.join(_ROOT, ".env"))
 
 # APP_DATABASE_URL takes priority (use this on Railway to avoid the auto-injected internal URL).
 # Falls back to DATABASE_URL for local dev.
+print("[db] env keys:", sorted(os.environ.keys()))
 print("[db] APP_DATABASE_URL =", repr(os.environ.get("APP_DATABASE_URL")))
 print("[db] DATABASE_URL =", repr(os.environ.get("DATABASE_URL")))
 DATABASE_URL = os.environ.get("APP_DATABASE_URL") or os.environ.get("DATABASE_URL")
