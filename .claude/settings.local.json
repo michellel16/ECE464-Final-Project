@@ -10,7 +10,9 @@
       "Bash(psql:*)",
       "Bash(python:*)",
       "Bash(npm install:*)",
-      "Bash(npm run:*)"
+      "Bash(npm run:*)",
+      "WebSearch",
+      "WebFetch(domain:docs.railway.com)"
     ]
   }
 }
