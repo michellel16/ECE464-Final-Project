@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import axios from 'axios'
 import { useAuth } from '../contexts/AuthContext'
+import { Avatar } from '../components/Navbar'
 import AlbumCard from '../components/AlbumCard'
 
 export default function Home() {
@@ -15,23 +16,22 @@ export default function Home() {
   const [suggested, setSuggested]               = useState([])
   const [loading, setLoading]                   = useState(true)
 
-  const fetchData = useCallback(() => {
+  useEffect(() => {
     setLoading(true)
-    const fetches = [
+    Promise.all([
       axios.get('/api/music/albums?limit=12&sort=recently_reviewed'),
       axios.get('/api/music/artists?limit=12&sort=recently_reviewed'),
       axios.get('/api/music/songs?limit=6&sort=recently_reviewed'),
-    ]
-    if (user) fetches.push(axios.get(`/api/users/${user.username}/activity?limit=15`))
-
-    Promise.all(fetches).then(([albumsRes, artistsRes, songsRes, feedRes]) => {
+    ]).then(([albumsRes, artistsRes, songsRes]) => {
       setAlbums(albumsRes.data)
       setArtists(artistsRes.data)
       setSongs(songsRes.data)
-      if (feedRes) setFeed(feedRes.data)
     }).finally(() => setLoading(false))
 
     if (user) {
+      axios.get(`/api/users/${user.username}/activity?limit=15`)
+        .then(r => setFeed(r.data))
+        .catch(() => {})
       axios.get('/api/music/recommended?song_limit=8')
         .then(r => { setRecommended(r.data.songs); setRecArtists(r.data.artists) })
         .catch(() => {})
@@ -40,19 +40,6 @@ export default function Home() {
         .catch(() => {})
     }
   }, [user])
-
-  useEffect(() => {
-    fetchData()
-  }, [fetchData])
-
-  // Refetch when the browser restores this page from the back-forward cache
-  useEffect(() => {
-    function onPageShow(e) {
-      if (e.persisted) fetchData()
-    }
-    window.addEventListener('pageshow', onPageShow)
-    return () => window.removeEventListener('pageshow', onPageShow)
-  }, [fetchData])
 
   if (loading) return <PageLoader />
 
