@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from .seed import seed_database
-from .routers import auth, users, music, lists, social, search, stats, spotify
+from .routers import auth, users, music, lists, social, search, stats, spotify, recommendations
 
 STATIC_DIR = Path(__file__).parent / "static"
 AVATARS_DIR = STATIC_DIR / "avatars"
@@ -38,6 +38,7 @@ app.include_router(social.router)
 app.include_router(search.router)
 app.include_router(stats.router)
 app.include_router(spotify.router)
+app.include_router(recommendations.router)
 
 
 async def _backfill_images():

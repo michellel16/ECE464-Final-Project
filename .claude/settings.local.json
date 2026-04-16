@@ -12,7 +12,10 @@
       "Bash(npm install:*)",
       "Bash(npm run:*)",
       "WebSearch",
-      "WebFetch(domain:docs.railway.com)"
+      "WebFetch(domain:docs.railway.com)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)"
     ]
   }
 }

@@ -13,6 +13,9 @@ export default function Home() {
   const [feed, setFeed]                         = useState([])
   const [recommended, setRecommended]           = useState([])
   const [recommendedArtists, setRecArtists]     = useState([])
+  const [forYouAlbums, setForYouAlbums]         = useState([])
+  const [forYouSongs, setForYouSongs]           = useState([])
+  const [forYouSource, setForYouSource]         = useState(null)
   const [suggested, setSuggested]               = useState([])
   const [loading, setLoading]                   = useState(true)
 
@@ -34,6 +37,13 @@ export default function Home() {
         .catch(() => {})
       axios.get('/api/music/recommended?song_limit=8')
         .then(r => { setRecommended(r.data.songs); setRecArtists(r.data.artists) })
+        .catch(() => {})
+      axios.get('/api/recommendations/me?album_limit=6&song_limit=6')
+        .then(r => {
+          setForYouAlbums(r.data.albums)
+          setForYouSongs(r.data.songs)
+          setForYouSource(r.data.source)
+        })
         .catch(() => {})
       axios.get('/api/users/suggested?limit=5')
         .then(r => setSuggested(r.data))
@@ -90,6 +100,47 @@ export default function Home() {
           {songs.map(s => <SongRow key={s.id} song={s} />)}
         </div>
       </section>
+
+      {/* Albums For You — vector-based */}
+      {user && forYouAlbums.length > 0 && (
+        <section>
+          <div className="flex items-center justify-between mb-5">
+            <div>
+              <h2 className="text-xl font-bold text-white">Albums For You</h2>
+              <p className="text-gray-500 text-sm mt-0.5">
+                {forYouSource === 'embedding'
+                  ? 'Matched to your taste using semantic similarity'
+                  : 'Top picks from the Tunelog community'}
+              </p>
+            </div>
+            {forYouSource === 'embedding' && (
+              <span className="text-xs text-violet-400/70 bg-violet-900/20 border border-violet-800/40 rounded-full px-3 py-1">
+                AI-powered
+              </span>
+            )}
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
+            {forYouAlbums.map(a => <ForYouAlbumCard key={a.id} album={a} />)}
+          </div>
+        </section>
+      )}
+
+      {/* Songs For You — vector-based */}
+      {user && forYouSongs.length > 0 && (
+        <section>
+          <div className="mb-5">
+            <h2 className="text-xl font-bold text-white">Songs For You</h2>
+            <p className="text-gray-500 text-sm mt-0.5">
+              {forYouSource === 'embedding'
+                ? 'Discovered via your taste profile'
+                : 'Trending on Tunelog'}
+            </p>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {forYouSongs.map(s => <ForYouSongRow key={s.id} song={s} />)}
+          </div>
+        </section>
+      )}
 
       {/* Recommended Artists */}
       {user && recommendedArtists.length > 0 && (
@@ -315,6 +366,71 @@ function ActivityItem({ item }) {
         <p className="text-gray-600 text-xs mt-0.5">{new Date(item.created_at).toLocaleDateString()}</p>
       </div>
     </div>
+  )
+}
+
+function ForYouAlbumCard({ album }) {
+  return (
+    <Link to={`/albums/${album.id}`} className="group block">
+      <div className="relative aspect-square bg-gray-800 rounded-lg overflow-hidden mb-2">
+        {album.cover_url ? (
+          <img
+            src={album.cover_url}
+            alt={album.title}
+            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+            loading="lazy"
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center text-4xl bg-gradient-to-br from-violet-900/60 to-gray-800">
+            💿
+          </div>
+        )}
+        {album.similarity != null && (
+          <span className="absolute bottom-1.5 right-1.5 text-[10px] font-semibold bg-black/70 text-violet-300 rounded-full px-1.5 py-0.5 backdrop-blur-sm">
+            {Math.round(album.similarity * 100)}% match
+          </span>
+        )}
+      </div>
+      <p className="text-white text-xs font-medium truncate group-hover:text-violet-400 transition-colors">
+        {album.title}
+      </p>
+      <p className="text-gray-500 text-[11px] truncate">{album.artist?.name}</p>
+    </Link>
+  )
+}
+
+function ForYouSongRow({ song }) {
+  return (
+    <Link
+      to={`/songs/${song.id}`}
+      className="card p-3 flex items-center gap-3 hover:border-violet-700 transition-colors group"
+    >
+      {song.album?.cover_url ? (
+        <img
+          src={song.album.cover_url}
+          alt=""
+          className="w-10 h-10 rounded object-cover shrink-0"
+          loading="lazy"
+        />
+      ) : (
+        <div className="w-10 h-10 rounded bg-gray-800 flex items-center justify-center text-gray-500 shrink-0">
+          ♪
+        </div>
+      )}
+      <div className="min-w-0 flex-1">
+        <p className="text-white text-sm font-medium truncate group-hover:text-violet-400 transition-colors">
+          {song.title}
+        </p>
+        <p className="text-gray-500 text-xs truncate">
+          {song.artist?.name}{song.album ? ` · ${song.album.title}` : ''}
+        </p>
+      </div>
+      {song.similarity != null && (
+        <span className="text-violet-400 text-[10px] font-semibold shrink-0 bg-violet-900/30 rounded-full px-2 py-0.5">
+          {Math.round(song.similarity * 100)}%
+        </span>
+      )}
+    </Link>
   )
 }
 
