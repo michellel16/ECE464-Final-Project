@@ -919,7 +919,6 @@ async def import_artist(
         if not artist.image_url and images:
             artist.image_url = images[0]["url"]
         db.flush()
-        _sync_artist_genres(artist, sp_artist.get("genres", []), db)
     else:
         artist = models.Artist(
             name=sp_artist["name"],

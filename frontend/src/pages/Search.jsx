@@ -20,15 +20,19 @@ export default function Search() {
   const [spotifyLoading, setSpotifyLoading] = useState(false)
   const [spotifyError, setSpotifyError]     = useState(null)
   const [importing, setImporting]           = useState({})
+  const [similarArtists, setSimilarArtists] = useState(null)   // {label, items}
+  const [similarAlbums, setSimilarAlbums]   = useState(null)
 
 
-  // Reset tab when query changes
+  // Reset tab and similar results when query changes
   useEffect(() => { setTab('All') }, [q])
 
   useEffect(() => {
     if (!q) {
       setLocalResults(null)
       setSpotifyResults(null)
+      setSimilarArtists(null)
+      setSimilarAlbums(null)
       return
     }
 
@@ -37,9 +41,26 @@ export default function Search() {
     setLocalResults(null)
     setSpotifyResults(null)
     setSpotifyError(null)
+    setSimilarArtists(null)
+    setSimilarAlbums(null)
 
     axios.get(`/api/search/?q=${encodeURIComponent(q)}`)
-      .then(r => setLocalResults(r.data))
+      .then(r => {
+        setLocalResults(r.data)
+        // Fire similar-item lookups immediately with the fresh data (no OpenAI)
+        const topArtist = r.data.artists?.[0]
+        const topAlbum  = r.data.albums?.[0]
+        if (topArtist) {
+          axios.get(`/api/search/similar?item_type=artist&item_id=${topArtist.id}&limit=5`)
+            .then(s => { if (s.data.items?.length) setSimilarArtists(s.data) })
+            .catch(e => console.error('[similar artists]', e?.response?.data ?? e.message))
+        }
+        if (topAlbum) {
+          axios.get(`/api/search/similar?item_type=album&item_id=${topAlbum.id}&limit=5`)
+            .then(s => { if (s.data.items?.length) setSimilarAlbums(s.data) })
+            .catch(e => console.error('[similar albums]', e?.response?.data ?? e.message))
+        }
+      })
       .finally(() => setLocalLoading(false))
 
     axios.get(`/api/spotify/search?q=${encodeURIComponent(q)}`)
@@ -225,6 +246,62 @@ export default function Search() {
 
           {localTotal === 0 && tab === 'Users' && (
             <p className="text-gray-500 text-sm">No users found for "{q}".</p>
+          )}
+        </div>
+      )}
+
+      {/* ── Recommended based on search ── */}
+      {(similarArtists || similarAlbums) && (tab === 'All' || tab === 'Artists' || tab === 'Albums') && (
+        <div className="space-y-6 pt-2">
+          <div className="flex items-center gap-3">
+            <div className="flex-1 h-px bg-gray-800" />
+            <span className="text-xs text-gray-400 font-medium tracking-wide uppercase">Recommended</span>
+            <div className="flex-1 h-px bg-gray-800" />
+          </div>
+
+          {similarArtists && (tab === 'All' || tab === 'Artists') && (
+            <div className="space-y-3">
+              <p className="text-base font-semibold text-white">{similarArtists.label}</p>
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
+                {similarArtists.items.map(a => (
+                  <Link key={a.id} to={`/artists/${a.id}`} className="group card p-3 flex flex-col items-center gap-2 hover:border-violet-700 transition-colors">
+                    {a.image_url ? (
+                      <img src={a.image_url} alt={a.name} className="w-16 h-16 rounded-full object-cover" loading="lazy" />
+                    ) : (
+                      <div className="w-16 h-16 rounded-full bg-gradient-to-br from-violet-900 to-gray-800 flex items-center justify-center text-2xl">🎤</div>
+                    )}
+                    <p className="text-white text-xs font-medium text-center group-hover:text-violet-400 transition-colors">{a.name}</p>
+                    {a.similarity != null && (
+                      <span className="text-[10px] text-violet-400/70">{Math.round(a.similarity * 100)}% match</span>
+                    )}
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {similarAlbums && (tab === 'All' || tab === 'Albums') && (
+            <div className="space-y-3">
+              <p className="text-base font-semibold text-white">{similarAlbums.label}</p>
+              <div className="space-y-2">
+                {similarAlbums.items.map(a => (
+                  <Link key={a.id} to={`/albums/${a.id}`} className="card p-3 flex items-center gap-4 hover:border-violet-700 transition-colors group">
+                    {a.cover_url ? (
+                      <img src={a.cover_url} alt={a.title} className="w-12 h-12 rounded object-cover shrink-0" loading="lazy" />
+                    ) : (
+                      <div className="w-12 h-12 rounded bg-gray-800 flex items-center justify-center text-xl shrink-0">🎵</div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-white font-medium group-hover:text-violet-400 transition-colors truncate">{a.title}</p>
+                      <p className="text-gray-500 text-sm">{a.artist?.name} · {a.release_date?.slice(0, 4)}</p>
+                    </div>
+                    {a.similarity != null && (
+                      <span className="text-[10px] text-violet-400/70 shrink-0">{Math.round(a.similarity * 100)}% match</span>
+                    )}
+                  </Link>
+                ))}
+              </div>
+            </div>
           )}
         </div>
       )}

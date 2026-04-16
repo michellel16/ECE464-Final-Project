@@ -155,6 +155,374 @@ async def search(q: str, db: Session = Depends(get_db)):
     }
 
 
+# ── Genre keyword normalisation ───────────────────────────────────────────────
+# Maps words that appear in Spotify genre slugs to the broad seeded genre name.
+# "uk soul" → contains "soul" → R&B.  "bedroom pop" → contains "pop" → Pop.
+_KEYWORD_TO_GENRE = {
+    # R&B / Soul
+    "soul": "R&B", "r&b": "R&B", "rhythm and blues": "R&B",
+    "funk": "R&B", "motown": "R&B",
+    # Hip-Hop
+    "hip hop": "Hip-Hop", "hip-hop": "Hip-Hop",
+    "rap": "Hip-Hop", "trap": "Hip-Hop", "drill": "Hip-Hop",
+    "grime": "Hip-Hop",
+    # Electronic
+    "electronic": "Electronic", "edm": "Electronic", "synth": "Electronic",
+    "dance": "Electronic", "house": "Electronic", "techno": "Electronic",
+    "ambient": "Electronic",
+    # Pop
+    "pop": "Pop",
+    # Rock / Alternative
+    "rock": "Rock", "metal": "Rock", "punk": "Rock",
+    "alternative": "Alternative", "grunge": "Alternative", "emo": "Alternative",
+    # Indie
+    "indie": "Indie", "lo-fi": "Indie", "lo fi": "Indie",
+    # Folk
+    "folk": "Folk", "country": "Folk", "americana": "Folk", "acoustic": "Folk",
+    # Jazz
+    "jazz": "Jazz",
+    # Classical
+    "classical": "Classical", "orchestra": "Classical", "symphon": "Classical",
+}
+
+
+def _genre_ids_for(anchor_genre_names: list[str], db: "Session") -> list[int]:
+    """
+    Given a list of (lowercased) Spotify genre slug names, return the IDs of
+    all Genre rows in the DB that they map to — using both substring containment
+    and the keyword map above.
+    """
+    all_genres = db.query(models.Genre).all()
+    genre_id_by_name = {g.name.lower(): g.id for g in all_genres}
+    matched: set[int] = set()
+
+    for agn in anchor_genre_names:
+        # 1. Direct substring containment
+        for g in all_genres:
+            gn = g.name.lower()
+            if gn in agn or agn in gn:
+                matched.add(g.id)
+        # 2. Keyword map  ("soul" → "R&B", "pop" → "Pop", etc.)
+        for keyword, seed_name in _KEYWORD_TO_GENRE.items():
+            if keyword in agn:
+                seed_id = genre_id_by_name.get(seed_name.lower())
+                if seed_id:
+                    matched.add(seed_id)
+
+    return list(matched)
+
+
+# ── Item-to-item similarity (no OpenAI — reads stored embeddings only) ────────
+
+@router.get("/similar")
+async def similar_items(
+    item_type: str,
+    item_id: int,
+    limit: int = 5,
+    db: Session = Depends(get_db),
+):
+    """
+    Return items similar to the given artist/album/song.
+
+    Four-level fallback for artists (no OpenAI calls):
+      1. pgvector cosine similarity on stored embeddings
+      2. Genre match — keyword map + substring (handles "uk soul" → R&B, etc.)
+      3. Spotify Related Artists API — exact similarity graph, runs when genres fail
+      4. Top-rated globally — guaranteed fallback
+    Albums and songs use steps 1, 2, then top-rated.
+    """
+    if item_type == "artist":
+        anchor = (
+            db.query(models.Artist)
+            .options(joinedload(models.Artist.genres))
+            .filter(models.Artist.id == item_id)
+            .first()
+        )
+        if anchor is None:
+            return {"items": [], "label": None, "source": "none"}
+
+        label = f"More like {anchor.name}"
+
+        # ── 1. Embedding similarity ───────────────────────────────────────────
+        if anchor.embedding is not None:
+            vec = "[" + ",".join(f"{v:.8f}" for v in anchor.embedding) + "]"
+            rows = db.execute(
+                text("""
+                    SELECT a.id, a.name, a.image_url,
+                           1 - (a.embedding <=> :emb::vector) AS similarity
+                    FROM artists a
+                    WHERE a.embedding IS NOT NULL AND a.id != :self_id
+                    ORDER BY a.embedding <=> :emb::vector
+                    LIMIT :lim
+                """),
+                {"emb": vec, "self_id": item_id, "lim": limit},
+            ).fetchall()
+            if rows:
+                return {"items": [
+                    {"item_type": "artist", "id": r.id, "name": r.name,
+                     "image_url": r.image_url, "similarity": round(float(r.similarity), 3)}
+                    for r in rows
+                ], "label": label, "source": "embedding"}
+
+        # ── 2. Genre match (substring + keyword map) ──────────────────────────
+        anchor_genre_names = [g.name.lower() for g in anchor.genres]
+        if anchor_genre_names:
+            matched_ids = _genre_ids_for(anchor_genre_names, db)
+            if matched_ids:
+                rows = db.execute(
+                    text("""
+                        SELECT a.id, a.name, a.image_url, COUNT(*) AS shared
+                        FROM artists a
+                        JOIN artist_genre ag ON ag.artist_id = a.id
+                        WHERE ag.genre_id = ANY(:gids) AND a.id != :self_id
+                        GROUP BY a.id, a.name, a.image_url
+                        ORDER BY shared DESC
+                        LIMIT :lim
+                    """),
+                    {"gids": matched_ids, "self_id": item_id, "lim": limit},
+                ).fetchall()
+                if rows:
+                    return {"items": [
+                        {"item_type": "artist", "id": r.id, "name": r.name,
+                         "image_url": r.image_url, "similarity": None}
+                        for r in rows
+                    ], "label": label, "source": "genre"}
+
+        # ── 3. Spotify Related Artists ────────────────────────────────────────
+        # Uses Spotify's own similarity graph — works even when genre tags are
+        # empty or too niche. Only runs if Spotify client credentials are set.
+        if anchor.spotify_id:
+            try:
+                token = await _get_client_token()
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    resp = await client.get(
+                        f"https://api.spotify.com/v1/artists/{anchor.spotify_id}/related-artists",
+                        headers=_sp_headers(token),
+                    )
+                if resp.status_code == 200:
+                    related_ids = [
+                        a["id"] for a in resp.json().get("artists", [])[:20]
+                        if a.get("id")
+                    ]
+                    if related_ids:
+                        matched = (
+                            db.query(models.Artist)
+                            .filter(models.Artist.spotify_id.in_(related_ids))
+                            .limit(limit)
+                            .all()
+                        )
+                        if matched:
+                            return {"items": [
+                                {"item_type": "artist", "id": a.id, "name": a.name,
+                                 "image_url": a.image_url, "similarity": None}
+                                for a in matched
+                            ], "label": label, "source": "spotify_related"}
+            except Exception:
+                pass  # Spotify not configured or rate-limited — fall through
+
+        # ── 4. Top-rated globally ─────────────────────────────────────────────
+        rows = db.execute(
+            text("""
+                SELECT a.id, a.name, a.image_url,
+                       COUNT(DISTINCT r.id) AS review_count
+                FROM artists a
+                LEFT JOIN albums al ON al.artist_id = a.id
+                LEFT JOIN reviews r ON r.album_id = al.id
+                WHERE a.id != :self_id
+                GROUP BY a.id, a.name, a.image_url
+                ORDER BY review_count DESC
+                LIMIT :lim
+            """),
+            {"self_id": item_id, "lim": limit},
+        ).fetchall()
+        return {"items": [
+            {"item_type": "artist", "id": r.id, "name": r.name,
+             "image_url": r.image_url, "similarity": None}
+            for r in rows
+        ], "label": "Popular on Tunelog", "source": "popular"}
+
+    elif item_type == "album":
+        anchor = (
+            db.query(models.Album)
+            .options(joinedload(models.Album.genres), joinedload(models.Album.artist))
+            .filter(models.Album.id == item_id)
+            .first()
+        )
+        if anchor is None:
+            return {"items": [], "label": None, "source": "none"}
+
+        label = f"Similar to {anchor.title}"
+
+        # ── 1. Embedding similarity ───────────────────────────────────────────
+        if anchor.embedding is not None:
+            vec = "[" + ",".join(f"{v:.8f}" for v in anchor.embedding) + "]"
+            rows = db.execute(
+                text("""
+                    SELECT al.id, al.title, al.cover_url, al.release_date,
+                           ar.id AS artist_id, ar.name AS artist_name,
+                           1 - (al.embedding <=> :emb::vector) AS similarity
+                    FROM albums al
+                    JOIN artists ar ON ar.id = al.artist_id
+                    WHERE al.embedding IS NOT NULL AND al.id != :self_id
+                    ORDER BY al.embedding <=> :emb::vector
+                    LIMIT :lim
+                """),
+                {"emb": vec, "self_id": item_id, "lim": limit},
+            ).fetchall()
+            if rows:
+                return {"items": [
+                    {"item_type": "album", "id": r.id, "title": r.title,
+                     "cover_url": r.cover_url, "release_date": r.release_date,
+                     "artist": {"id": r.artist_id, "name": r.artist_name},
+                     "similarity": round(float(r.similarity), 3)}
+                    for r in rows
+                ], "label": label, "source": "embedding"}
+
+        # ── 2. Genre match (substring + keyword map) ──────────────────────────
+        anchor_genre_names = [g.name.lower() for g in anchor.genres]
+        if anchor_genre_names:
+            matched_ids = _genre_ids_for(anchor_genre_names, db)
+            if matched_ids:
+                rows = db.execute(
+                    text("""
+                        SELECT al.id, al.title, al.cover_url, al.release_date,
+                               ar.id AS artist_id, ar.name AS artist_name,
+                               COUNT(*) AS shared
+                        FROM albums al
+                        JOIN artists ar ON ar.id = al.artist_id
+                        JOIN album_genre ag ON ag.album_id = al.id
+                        WHERE ag.genre_id = ANY(:gids) AND al.id != :self_id
+                        GROUP BY al.id, al.title, al.cover_url, al.release_date, ar.id, ar.name
+                        ORDER BY shared DESC
+                        LIMIT :lim
+                    """),
+                    {"gids": matched_ids, "self_id": item_id, "lim": limit},
+                ).fetchall()
+                if rows:
+                    return {"items": [
+                        {"item_type": "album", "id": r.id, "title": r.title,
+                         "cover_url": r.cover_url, "release_date": r.release_date,
+                         "artist": {"id": r.artist_id, "name": r.artist_name},
+                         "similarity": None}
+                        for r in rows
+                    ], "label": label, "source": "genre"}
+
+        # ── 3. Top-rated globally ─────────────────────────────────────────────
+        rows = db.execute(
+            text("""
+                SELECT al.id, al.title, al.cover_url, al.release_date,
+                       ar.id AS artist_id, ar.name AS artist_name,
+                       COALESCE(AVG(r.rating), 0) AS avg_rating
+                FROM albums al
+                JOIN artists ar ON ar.id = al.artist_id
+                LEFT JOIN reviews r ON r.album_id = al.id
+                WHERE al.id != :self_id
+                GROUP BY al.id, al.title, al.cover_url, al.release_date, ar.id, ar.name
+                ORDER BY avg_rating DESC
+                LIMIT :lim
+            """),
+            {"self_id": item_id, "lim": limit},
+        ).fetchall()
+        return {"items": [
+            {"item_type": "album", "id": r.id, "title": r.title,
+             "cover_url": r.cover_url, "release_date": r.release_date,
+             "artist": {"id": r.artist_id, "name": r.artist_name},
+             "similarity": None}
+            for r in rows
+        ], "label": "Popular on Tunelog", "source": "popular"}
+
+    elif item_type == "song":
+        anchor = (
+            db.query(models.Song)
+            .options(
+                joinedload(models.Song.artist).joinedload(models.Artist.genres),
+                joinedload(models.Song.album),
+            )
+            .filter(models.Song.id == item_id)
+            .first()
+        )
+        if anchor is None:
+            return {"items": [], "label": None, "source": "none"}
+
+        label = f"Similar to {anchor.title}"
+
+        # ── 1. Embedding similarity ───────────────────────────────────────────
+        if anchor.embedding is not None:
+            vec = "[" + ",".join(f"{v:.8f}" for v in anchor.embedding) + "]"
+            rows = db.execute(
+                text("""
+                    SELECT s.id, s.title,
+                           ar.id AS artist_id, ar.name AS artist_name,
+                           al.id AS album_id, al.title AS album_title, al.cover_url,
+                           1 - (s.embedding <=> :emb::vector) AS similarity
+                    FROM songs s
+                    JOIN artists ar ON ar.id = s.artist_id
+                    LEFT JOIN albums al ON al.id = s.album_id
+                    WHERE s.embedding IS NOT NULL AND s.id != :self_id
+                    ORDER BY s.embedding <=> :emb::vector
+                    LIMIT :lim
+                """),
+                {"emb": vec, "self_id": item_id, "lim": limit},
+            ).fetchall()
+            if rows:
+                return {"items": [
+                    {"item_type": "song", "id": r.id, "title": r.title,
+                     "artist": {"id": r.artist_id, "name": r.artist_name},
+                     "album": {"id": r.album_id, "title": r.album_title, "cover_url": r.cover_url} if r.album_id else None,
+                     "similarity": round(float(r.similarity), 3)}
+                    for r in rows
+                ], "label": label, "source": "embedding"}
+
+        # ── 2. Other songs by same artist ─────────────────────────────────────
+        rows = db.execute(
+            text("""
+                SELECT s.id, s.title,
+                       ar.id AS artist_id, ar.name AS artist_name,
+                       al.id AS album_id, al.title AS album_title, al.cover_url
+                FROM songs s
+                JOIN artists ar ON ar.id = s.artist_id
+                LEFT JOIN albums al ON al.id = s.album_id
+                WHERE s.artist_id = :artist_id AND s.id != :self_id
+                LIMIT :lim
+            """),
+            {"artist_id": anchor.artist_id, "self_id": item_id, "lim": limit},
+        ).fetchall()
+        if rows:
+            artist_name = anchor.artist.name if anchor.artist else "this artist"
+            return {"items": [
+                {"item_type": "song", "id": r.id, "title": r.title,
+                 "artist": {"id": r.artist_id, "name": r.artist_name},
+                 "album": {"id": r.album_id, "title": r.album_title, "cover_url": r.cover_url} if r.album_id else None,
+                 "similarity": None}
+                for r in rows
+            ], "label": f"More from {artist_name}", "source": "artist"}
+
+        # ── 3. Top-rated globally ─────────────────────────────────────────────
+        rows = db.execute(
+            text("""
+                SELECT s.id, s.title,
+                       ar.id AS artist_id, ar.name AS artist_name,
+                       al.id AS album_id, al.title AS album_title, al.cover_url
+                FROM songs s
+                JOIN artists ar ON ar.id = s.artist_id
+                LEFT JOIN albums al ON al.id = s.album_id
+                LEFT JOIN reviews r ON r.song_id = s.id
+                WHERE s.id != :self_id
+                GROUP BY s.id, s.title, ar.id, ar.name, al.id, al.title, al.cover_url
+                ORDER BY COALESCE(AVG(r.rating), 0) DESC
+                LIMIT :lim
+            """),
+            {"self_id": item_id, "lim": limit},
+        ).fetchall()
+        return {"items": [
+            {"item_type": "song", "id": r.id, "title": r.title,
+             "artist": {"id": r.artist_id, "name": r.artist_name},
+             "album": {"id": r.album_id, "title": r.album_title, "cover_url": r.cover_url} if r.album_id else None,
+             "similarity": None}
+            for r in rows
+        ], "label": "Popular on Tunelog", "source": "popular"}
+
+
 # ── Semantic (vibe) search ────────────────────────────────────────────────────
 
 @router.get("/semantic")
