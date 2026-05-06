@@ -1,7 +1,8 @@
+import json
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Body, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 
 from .. import models, schemas
@@ -16,6 +17,10 @@ router = APIRouter(prefix="/api/users", tags=["users"])
 
 
 def _user_out(user: models.User) -> dict:
+    try:
+        prefs = json.loads(user.music_preferences or '{}')
+    except Exception:
+        prefs = {}
     return {
         "id": user.id,
         "username": user.username,
@@ -26,6 +31,7 @@ def _user_out(user: models.User) -> dict:
         "follower_count": len(user.followers),
         "following_count": len(user.following),
         "is_private": user.is_private or False,
+        "music_preferences": prefs,
     }
 
 
@@ -141,6 +147,32 @@ async def upload_avatar(
     current_user.avatar_url = f"/static/avatars/{filename}"
     db.commit()
     return {"avatar_url": current_user.avatar_url}
+
+
+@router.get("/me/preferences")
+def get_preferences(current_user: models.User = Depends(get_current_user)):
+    try:
+        prefs = json.loads(current_user.music_preferences or '{}')
+    except Exception:
+        prefs = {}
+    return prefs
+
+
+@router.put("/me/preferences")
+def update_preferences(
+    body: dict = Body(...),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    genres    = [str(g)[:60] for g in (body.get('genres') or []) if g][:12]
+    moods     = [str(m)[:40] for m in (body.get('moods')  or []) if m][:12]
+    free_text = str(body.get('free_text') or '').strip()[:300]
+
+    prefs = {'genres': genres, 'moods': moods, 'free_text': free_text}
+    current_user.music_preferences = json.dumps(prefs)
+    current_user.taste_profile_hash = None  # force taste embedding refresh
+    db.commit()
+    return prefs
 
 
 @router.post("/{username}/follow")

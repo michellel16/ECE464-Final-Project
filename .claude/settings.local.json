@@ -15,7 +15,8 @@
       "WebFetch(domain:docs.railway.com)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(Find C:\\\\Users\\\\miche\\\\PycharmProjects\\\\ECE464-Final-Project\\\\alembic\\\\versions *)"
     ]
   }
 }

@@ -127,7 +127,9 @@ export default function Home() {
             <div>
               <h2 className="text-xl font-bold text-white">Albums For You</h2>
               <p className="text-gray-500 text-sm mt-0.5">
-                {forYouSource === 'embedding'
+                {forYouSource === 'preferences'
+                  ? 'Personalized for your taste and stated interests'
+                  : forYouSource === 'embedding'
                   ? 'Matched to your taste using semantic similarity'
                   : forYouSource === 'centroid'
                   ? 'Based on your listening history'
@@ -152,7 +154,9 @@ export default function Home() {
           <div className="mb-5">
             <h2 className="text-xl font-bold text-white">Songs For You</h2>
             <p className="text-gray-500 text-sm mt-0.5">
-              {forYouSource === 'embedding'
+              {forYouSource === 'preferences'
+                ? 'Personalized for your taste and stated interests'
+                : forYouSource === 'embedding'
                 ? 'Discovered via your taste profile'
                 : forYouSource === 'centroid'
                 ? 'Based on your listening history'

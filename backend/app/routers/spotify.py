@@ -7,10 +7,12 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from fastapi.responses import RedirectResponse
 from jose import jwt, JWTError
-from sqlalchemy.orm import Session
+from sqlalchemy import text
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from .. import models
-from ..database import get_db
+from ..database import get_db, SessionLocal
 from ..auth import get_current_user, SECRET_KEY, ALGORITHM
 
 router = APIRouter(prefix="/api/spotify", tags=["spotify"])
@@ -22,6 +24,15 @@ SPOTIFY_SCOPES        = "user-read-private user-read-email playlist-read-private
 FRONTEND_URL          = os.getenv("FRONTEND_URL", "http://localhost:5173")
 
 _STATE_EXPIRE_MINUTES = 10
+
+# ── MusicBrainz background-job state ─────────────────────────────────────────
+
+_mb_progress: dict = {
+    "running":      False,
+    "done":         0,
+    "total":        0,
+    "genres_added": 0,
+}
 
 # ── Client-credentials token cache (app-level, no user needed) ──────────────
 
@@ -123,6 +134,17 @@ def _sync_artist_genres(artist, spotify_genres: list[str], db) -> None:
             db.flush()
         if genre.id not in existing_ids:
             artist.genres.append(genre)
+            existing_ids.add(genre.id)
+
+
+def _sync_album_genres(album, artist, db) -> None:
+    """Propagate the artist's genres onto the album when the album has none."""
+    if album.genres or not artist.genres:
+        return
+    existing_ids = {g.id for g in album.genres}
+    for genre in artist.genres:
+        if genre.id not in existing_ids:
+            album.genres.append(genre)
             existing_ids.add(genre.id)
 
 
@@ -437,9 +459,9 @@ async def import_track(
                 models.Artist.name.ilike(sp_artist["name"])
             ).first()
 
-        # Fetch full artist from Spotify if we need the image
+        # Fetch full artist from Spotify if we need image or genres
         sp_artist_full = None
-        if sp_artist.get("id") and (not artist or not artist.image_url):
+        if sp_artist.get("id") and (not artist or not artist.image_url or not artist.genres):
             art_resp = await client.get(
                 f"https://api.spotify.com/v1/artists/{sp_artist['id']}",
                 headers=_spotify_headers(token),
@@ -464,6 +486,9 @@ async def import_track(
             db.add(artist)
             db.flush()
 
+    if sp_artist_full:
+        _sync_artist_genres(artist, sp_artist_full.get("genres", []), db)
+
     # Resolve album
     sp_album = track.get("album", {})
     album = db.query(models.Album).filter(models.Album.spotify_id == sp_album.get("id")).first()
@@ -479,6 +504,8 @@ async def import_track(
             album.spotify_id = sp_album["id"]
         if not album.cover_url and sp_images:
             album.cover_url = sp_images[0]["url"]
+        if not album.release_date and sp_album.get("release_date"):
+            album.release_date = sp_album["release_date"][:4]
     elif sp_album.get("name"):
         release_date = sp_album.get("release_date")
         album = models.Album(
@@ -490,6 +517,9 @@ async def import_track(
         )
         db.add(album)
         db.flush()
+
+    if album:
+        _sync_album_genres(album, artist, db)
 
     # Create song
     duration_ms = track.get("duration_ms")
@@ -613,6 +643,320 @@ async def audio_profile(
         "personality":         _compute_personality(avgs),
         **{k: round(v, 3) for k, v in avgs.items()},
     }
+
+
+# ── MusicBrainz helpers ───────────────────────────────────────────────────────
+
+_MB_HEADERS = {
+    "User-Agent": "Tunelog/1.0 (music-catalog-app)",
+    "Accept":     "application/json",
+}
+
+
+async def _musicbrainz_backfill(artist_ids: list[int]) -> None:
+    """
+    Background task: tag untagged artists via MusicBrainz then propagate to albums.
+    Two requests per matched artist (search → lookup with inc=tags+genres).
+    Uses direct SQL inserts on association tables to avoid ORM collection issues.
+    Rate-limited to 1 req/sec per MusicBrainz policy (sleep after every HTTP request).
+    """
+    global _mb_progress
+    _mb_progress["running"]      = True
+    _mb_progress["done"]         = 0
+    _mb_progress["total"]        = len(artist_ids)
+    _mb_progress["genres_added"] = 0
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        for artist_id in artist_ids:
+            db = SessionLocal()
+            try:
+                # Re-check in a fresh session — a previous iteration may have tagged this artist
+                already_tagged = db.execute(
+                    models.artist_genre.select()
+                    .where(models.artist_genre.c.artist_id == artist_id)
+                ).first()
+                if already_tagged:
+                    continue
+
+                artist = db.query(models.Artist).filter(models.Artist.id == artist_id).first()
+                if not artist:
+                    continue
+
+                # Step 1: search MusicBrainz for MBID
+                search_resp = await client.get(
+                    "https://musicbrainz.org/ws/2/artist",
+                    params={"query": f'artist:"{artist.name}"', "limit": 1, "fmt": "json"},
+                    headers=_MB_HEADERS,
+                )
+                await asyncio.sleep(1.1)
+
+                if search_resp.status_code != 200:
+                    continue
+
+                items = search_resp.json().get("artists") or []
+                if not items:
+                    continue
+
+                mb_artist = items[0]
+                mb_name = mb_artist.get("name", "").lower()
+                db_name = artist.name.lower()
+                score   = int(mb_artist.get("score", 0) or 0)
+                # Accept exact name match OR score-100 result (handles minor variants)
+                if mb_name != db_name and score < 100:
+                    continue
+
+                mbid = mb_artist.get("id")
+                if not mbid:
+                    continue
+
+                # Step 2: full lookup with tags + genres
+                lookup_resp = await client.get(
+                    f"https://musicbrainz.org/ws/2/artist/{mbid}",
+                    params={"inc": "tags+genres", "fmt": "json"},
+                    headers=_MB_HEADERS,
+                )
+                await asyncio.sleep(1.1)
+
+                if lookup_resp.status_code != 200:
+                    continue
+
+                mb_full = lookup_resp.json()
+                # Prefer curated MusicBrainz genres; fall back to free-form tags
+                raw = (
+                    [g["name"] for g in (mb_full.get("genres") or []) if g.get("count", 0) > 0]
+                    or [t["name"] for t in (mb_full.get("tags") or []) if t.get("count", 0) > 0]
+                )
+                if not raw:
+                    continue
+
+                # Resolve/create Genre rows
+                genre_ids: list[int] = []
+                for tag in raw[:5]:
+                    name = tag.title()
+                    genre = (
+                        db.query(models.Genre).filter(models.Genre.name == name).first()
+                        or db.query(models.Genre).filter(models.Genre.name.ilike(tag)).first()
+                    )
+                    if not genre:
+                        genre = models.Genre(name=name)
+                        db.add(genre)
+                        db.flush()
+                    genre_ids.append(genre.id)
+
+                if not genre_ids:
+                    continue
+
+                # Insert artist→genre associations (skip duplicates)
+                for gid in genre_ids:
+                    db.execute(
+                        pg_insert(models.artist_genre)
+                        .values(artist_id=artist_id, genre_id=gid)
+                        .on_conflict_do_nothing()
+                    )
+
+                # Propagate to all albums — on_conflict_do_nothing skips duplicates
+                album_ids = [
+                    row[0] for row in
+                    db.query(models.Album.id)
+                    .filter(models.Album.artist_id == artist_id)
+                    .all()
+                ]
+                for aid in album_ids:
+                    for gid in genre_ids:
+                        db.execute(
+                            pg_insert(models.album_genre)
+                            .values(album_id=aid, genre_id=gid)
+                            .on_conflict_do_nothing()
+                        )
+
+                db.commit()
+                _mb_progress["genres_added"] += 1
+
+            except Exception as e:
+                print(f"[MusicBrainz] Error for artist {artist_id}: {e}")
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+            finally:
+                db.close()
+                _mb_progress["done"] += 1
+
+    _mb_progress["running"] = False
+
+
+# ── Metadata backfill ────────────────────────────────────────────────────────
+
+@router.get("/backfill-status")
+async def backfill_status():
+    """Return current MusicBrainz background-job progress."""
+    return dict(_mb_progress)
+
+
+@router.post("/backfill-metadata")
+async def backfill_metadata(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """
+    One-time backfill: for every artist/album already in the DB that is missing
+    genres or release_date, fetch the data from Spotify and persist it.
+    Uses client-credentials (no user scopes required).
+    """
+    stats = {
+        "artists_genres_synced": 0,
+        "albums_genres_propagated": 0,
+        "albums_release_date_fixed": 0,
+        "spotify_available": False,
+        "still_untagged_albums": 0,
+    }
+
+    # Try to get a client-credentials token; Spotify steps are skipped if unavailable
+    token: str | None = None
+    try:
+        token = await _get_client_token()
+        stats["spotify_available"] = True
+    except HTTPException:
+        pass
+
+    # ── 1a. Artists WITH spotify_id but no genres — batch lookup ─────────────
+    all_artists = (
+        db.query(models.Artist)
+        .options(joinedload(models.Artist.genres))
+        .all()
+    )
+    artists_with_id    = [a for a in all_artists if not a.genres and a.spotify_id]
+    artists_without_id = [a for a in all_artists if not a.genres and not a.spotify_id]
+
+    if artists_with_id and token:
+        sp_artist_data: dict[str, dict] = {}
+        async with httpx.AsyncClient() as client:
+            for i in range(0, len(artists_with_id), 50):
+                batch = ",".join(a.spotify_id for a in artists_with_id[i:i+50])
+                resp = await client.get(
+                    "https://api.spotify.com/v1/artists",
+                    params={"ids": batch},
+                    headers=_spotify_headers(token),
+                )
+                if resp.status_code == 200:
+                    for sp in (resp.json().get("artists") or []):
+                        if sp:
+                            sp_artist_data[sp["id"]] = sp
+
+        for artist in artists_with_id:
+            sp = sp_artist_data.get(artist.spotify_id)
+            if not sp:
+                continue
+            _sync_artist_genres(artist, sp.get("genres", []), db)
+            if not artist.image_url:
+                imgs = sp.get("images") or []
+                if imgs:
+                    artist.image_url = imgs[0]["url"]
+            if artist.genres:
+                stats["artists_genres_synced"] += 1
+
+        db.flush()
+
+    # ── 1b. Artists WITHOUT spotify_id — search Spotify by name ──────────────
+    if artists_without_id and token:
+        async with httpx.AsyncClient() as client:
+            for artist in artists_without_id:
+                resp = await client.get(
+                    "https://api.spotify.com/v1/search",
+                    params={"q": f"artist:{artist.name}", "type": "artist", "limit": 1},
+                    headers=_spotify_headers(token),
+                )
+                if resp.status_code != 200:
+                    continue
+                items = (resp.json().get("artists") or {}).get("items") or []
+                if not items:
+                    continue
+                sp = items[0]
+                # Only accept an exact name match to avoid mis-attribution
+                if sp["name"].lower() != artist.name.lower():
+                    continue
+                artist.spotify_id = sp["id"]
+                if not artist.image_url:
+                    imgs = sp.get("images") or []
+                    if imgs:
+                        artist.image_url = imgs[0]["url"]
+                _sync_artist_genres(artist, sp.get("genres", []), db)
+                if artist.genres:
+                    stats["artists_genres_synced"] += 1
+
+        db.flush()
+
+    # ── 2. Propagate artist genres → albums (direct SQL, no Spotify needed) ────
+    # Find (album_id, genre_id) pairs where the artist has that genre but the
+    # album does not yet. Uses raw SQL to avoid ORM collection-management issues.
+    propagate_rows = db.execute(text("""
+        SELECT DISTINCT ag.genre_id, alb.id AS album_id
+        FROM   artist_genre ag
+        JOIN   albums       alb  ON alb.artist_id = ag.artist_id
+        WHERE  NOT EXISTS (
+            SELECT 1 FROM album_genre ag2
+            WHERE  ag2.album_id = alb.id
+            AND    ag2.genre_id = ag.genre_id
+        )
+    """)).fetchall()
+
+    all_albums = db.query(models.Album).options(joinedload(models.Album.genres)).all()
+
+    for row in propagate_rows:
+        db.execute(
+            pg_insert(models.album_genre)
+            .values(album_id=row.album_id, genre_id=row.genre_id)
+            .on_conflict_do_nothing()
+        )
+    stats["albums_genres_propagated"] = len(propagate_rows)
+
+    # ── 3. Albums missing release_date (requires Spotify) ────────────────────
+    albums_missing_date = [a for a in all_albums if not a.release_date and a.spotify_id]
+
+    if albums_missing_date and token:
+        sp_album_data: dict[str, dict] = {}
+        async with httpx.AsyncClient() as client:
+            for i in range(0, len(albums_missing_date), 20):
+                batch = ",".join(a.spotify_id for a in albums_missing_date[i:i+20])
+                resp = await client.get(
+                    "https://api.spotify.com/v1/albums",
+                    params={"ids": batch},
+                    headers=_spotify_headers(token),
+                )
+                if resp.status_code == 200:
+                    for sp in (resp.json().get("albums") or []):
+                        if sp:
+                            sp_album_data[sp["id"]] = sp
+
+        for album in albums_missing_date:
+            sp = sp_album_data.get(album.spotify_id)
+            if sp and sp.get("release_date"):
+                album.release_date = sp["release_date"][:4]
+                stats["albums_release_date_fixed"] += 1
+
+    db.commit()
+
+    # Tally remaining untagged counts directly from DB (ORM objects expired after commit)
+    stats["still_untagged_albums"] = db.execute(text("""
+        SELECT COUNT(*) FROM albums
+        WHERE NOT EXISTS (SELECT 1 FROM album_genre WHERE album_genre.album_id = albums.id)
+    """)).scalar() or 0
+
+    # ── 4. Launch MusicBrainz background job for remaining untagged artists ───
+    untagged_artist_ids = [
+        row[0] for row in db.execute(text("""
+            SELECT id FROM artists
+            WHERE NOT EXISTS (SELECT 1 FROM artist_genre WHERE artist_genre.artist_id = artists.id)
+        """)).fetchall()
+    ]
+    stats["mb_started"]      = False
+    stats["mb_artist_queue"] = len(untagged_artist_ids)
+
+    if untagged_artist_ids and not _mb_progress["running"]:
+        asyncio.create_task(_musicbrainz_backfill(untagged_artist_ids))
+        stats["mb_started"] = True
+
+    return stats
 
 
 # ── Catalog search (no user auth required) ───────────────────────────────────
@@ -761,8 +1105,10 @@ async def import_album(
         artist = db.query(models.Artist).filter(models.Artist.spotify_id == sp_artist["id"]).first()
     if not artist and sp_artist.get("name"):
         artist = db.query(models.Artist).filter(models.Artist.name.ilike(sp_artist["name"])).first()
-    if not artist:
-        # Fetch fuller artist info for image/genres
+
+    # Fetch full artist for image + genres (new artist, or existing one missing either)
+    sp_art_full = None
+    if sp_artist.get("id") and (not artist or not artist.image_url or not artist.genres):
         async with httpx.AsyncClient() as client:
             art_resp = await client.get(
                 f"https://api.spotify.com/v1/artists/{sp_artist['id']}",
@@ -770,19 +1116,27 @@ async def import_album(
             )
         if art_resp.status_code == 200:
             sp_art_full = art_resp.json()
-            art_images  = sp_art_full.get("images") or []
-            artist = models.Artist(
-                name=sp_art_full.get("name", sp_artist.get("name", "Unknown")),
-                spotify_id=sp_art_full.get("id"),
-                image_url=art_images[0]["url"] if art_images else None,
-            )
-        else:
-            artist = models.Artist(
-                name=sp_artist.get("name", "Unknown Artist"),
-                spotify_id=sp_artist.get("id"),
-            )
+
+    if not artist:
+        art_images = (sp_art_full.get("images") or []) if sp_art_full else []
+        artist = models.Artist(
+            name=(sp_art_full or sp_artist).get("name", "Unknown Artist"),
+            spotify_id=sp_artist.get("id"),
+            image_url=art_images[0]["url"] if art_images else None,
+        )
         db.add(artist)
         db.flush()
+    else:
+        if not artist.spotify_id and sp_artist.get("id"):
+            artist.spotify_id = sp_artist["id"]
+        if not artist.image_url and sp_art_full:
+            imgs = sp_art_full.get("images") or []
+            if imgs:
+                artist.image_url = imgs[0]["url"]
+        db.flush()
+
+    if sp_art_full:
+        _sync_artist_genres(artist, sp_art_full.get("genres", []), db)
 
     # ── Create album ──
     images       = sp_album.get("images") or []
@@ -797,6 +1151,7 @@ async def import_album(
     )
     db.add(album)
     db.flush()
+    _sync_album_genres(album, artist, db)
 
     # ── Fetch audio features in one batch (best-effort) ──
     track_ids = [t["id"] for t in sp_tracks if t and t.get("id")]
@@ -961,6 +1316,7 @@ async def import_artist(
         )
         db.add(album)
         db.flush()
+        _sync_album_genres(album, artist, db)
 
         # Tracks + audio features
         sp_tracks = full_alb.get("tracks", {}).get("items") or []

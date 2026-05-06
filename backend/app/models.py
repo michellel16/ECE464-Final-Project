@@ -118,6 +118,7 @@ class User(Base):
     spotify_image_url         = Column(String,      nullable=True)
     taste_embedding           = Column(Vector(1536), nullable=True)
     taste_profile_hash        = Column(String(64),   nullable=True)
+    music_preferences         = Column(Text, nullable=True)  # JSON: {genres, moods, free_text}
 
     reviews       = relationship("Review",          back_populates="user")
     lists         = relationship("List",            back_populates="user")

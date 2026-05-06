@@ -1,10 +1,9 @@
+import json
 from datetime import datetime
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Body
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
-from typing import List
-
-from typing import Optional
+from typing import List, Optional
 
 from .. import models, schemas
 from ..database import get_db
@@ -292,8 +291,29 @@ def recommended_combined(
     artist_scores, liked_artist_ids, liked_genre_counts, genre_to_liked_artists = \
         _build_affinity(uid, db)
 
+    # Track original affinity genres (from actual listening) before preference boost
+    affinity_genre_ids: set[int] = set(liked_genre_counts.keys())
+
+    # Boost genre affinities from user's stated music preferences
+    pref_genre_ids: set[int] = set()
+    try:
+        prefs = json.loads(current_user.music_preferences or '{}')
+        for gname in prefs.get('genres', []):
+            genre = db.query(models.Genre).filter(models.Genre.name.ilike(gname)).first()
+            if genre:
+                liked_genre_counts[genre.id] = liked_genre_counts.get(genre.id, 0.0) + 2.5
+                pref_genre_ids.add(genre.id)
+    except Exception:
+        pass
+
+    # Genres that only come from stated preferences (no actual listening history)
+    pref_only_genre_ids: set[int] = pref_genre_ids - affinity_genre_ids
+
     liked_genre_ids = set(liked_genre_counts)
     interacted_ids = set(artist_scores.keys())
+
+    # Track which "Similar to X" reasons have been used to avoid repeating the same artist name
+    used_similar_refs: set[str] = set()
 
     # ── Artists ──────────────────────────────────────────────────────────────
     artist_candidates = (
@@ -309,10 +329,16 @@ def recommended_combined(
     def _artist_reason(a: models.Artist) -> str:
         best = max((g for g in a.genres if g.id in liked_genre_ids),
                    key=lambda g: liked_genre_counts[g.id], default=None)
-        if best:
-            similar = genre_to_liked_artists.get(best.id, [])
-            return f"Similar to {similar[0]}" if similar else f"Based on your love of {best.name}"
-        return "You might enjoy this"
+        if not best:
+            return "You might enjoy this"
+        if best.id in pref_only_genre_ids:
+            return f"Matches your {best.name} interest"
+        similar = genre_to_liked_artists.get(best.id, [])
+        for name in similar:
+            if name not in used_similar_refs:
+                used_similar_refs.add(name)
+                return f"Similar to {name}"
+        return f"Based on your love of {best.name}"
 
     sorted_artists = [a for a in sorted(artist_candidates, key=_artist_score, reverse=True) if _artist_score(a) > 0]
     top_artists = _diverse_pick(
@@ -392,8 +418,14 @@ def recommended_combined(
             key=lambda g: liked_genre_counts[g.id], default=None,
         )
         if best:
+            if best.id in pref_only_genre_ids:
+                return f"Matches your {best.name} interest"
             similar = genre_to_liked_artists.get(best.id, [])
-            return f"Similar to {similar[0]}" if similar else f"Based on your love of {best.name}"
+            for name in similar:
+                if name not in used_similar_refs:
+                    used_similar_refs.add(name)
+                    return f"Similar to {name}"
+            return f"Based on your love of {best.name}"
         r = avg_ratings.get(s.id)
         return f"Highly rated · ★ {r:.1f}" if r and r >= 4.0 else "Popular on Tunelog"
 

@@ -15,7 +15,9 @@ When the taste embedding is stale or missing, a background task is enqueued to
 call OpenAI and update the cache — so the next request can use path 1. This
 keeps OpenAI rate limits entirely out of the hot request path.
 """
+import asyncio
 import hashlib
+import json
 import logging
 import math
 from typing import Optional
@@ -36,16 +38,18 @@ _MIN_PROFILE_SIZE = 2
 
 # ── Taste-profile helpers ──────────────────────────────────────────────────────
 
-def _profile_fingerprint(reviews, album_statuses, song_statuses) -> str:
+def _profile_fingerprint(reviews, album_statuses, song_statuses, preferences: dict | None = None) -> str:
     parts = (
         [f"r{r.id}:{r.rating:.1f}" for r in sorted(reviews, key=lambda x: x.id)]
         + [f"as{s.album_id}:{s.status}" for s in sorted(album_statuses, key=lambda x: x.album_id)]
         + [f"ss{s.song_id}:{s.status}" for s in sorted(song_statuses, key=lambda x: x.song_id)]
     )
+    if preferences:
+        parts.append(f"prefs:{json.dumps(preferences, sort_keys=True)}")
     return hashlib.sha256("|".join(parts).encode()).hexdigest()[:64]
 
 
-def _build_taste_text(reviews, album_statuses, song_statuses) -> str:
+def _build_taste_text(reviews, album_statuses, song_statuses, preferences: dict | None = None) -> str:
     parts = ["Music taste profile:"]
 
     for rev in sorted(reviews, key=lambda r: -(r.rating or 0))[:12]:
@@ -78,7 +82,36 @@ def _build_taste_text(reviews, album_statuses, song_statuses) -> str:
     if top_genres:
         parts.append(f"Preferred genres: {', '.join(top_genres)}")
 
+    if preferences:
+        if genres := preferences.get('genres', []):
+            parts.append(f"Stated favorite genres: {', '.join(genres)}")
+        if moods := preferences.get('moods', []):
+            parts.append(f"Music vibe preferences: {', '.join(moods)}")
+        if ft := preferences.get('free_text', '').strip():
+            parts.append(f"Taste description: {ft}")
+
     return ". ".join(parts)
+
+
+def _round_robin_merge(sets: list[list[dict]], limit: int) -> list[dict]:
+    """Interleave results from multiple clusters, deduplicating by id."""
+    seen: set[int] = set()
+    result: list[dict] = []
+    indices = [0] * len(sets)
+    while len(result) < limit:
+        made_progress = False
+        for i, items in enumerate(sets):
+            while indices[i] < len(items):
+                item = items[indices[i]]
+                indices[i] += 1
+                if item["id"] not in seen:
+                    seen.add(item["id"])
+                    result.append(item)
+                    made_progress = True
+                    break
+        if not made_progress:
+            break
+    return result[:limit]
 
 
 def _get_cached_embedding(user: models.User, fingerprint: str) -> Optional[list[float]]:
@@ -293,6 +326,7 @@ async def my_recommendations(
 ):
     uid = current_user.id
 
+    # ── Load user interactions ─────────────────────────────────────────────────
     reviews = (
         db.query(models.Review)
         .options(
@@ -326,14 +360,13 @@ async def my_recommendations(
         .all()
     )
 
+    # ── Build "seen" exclusion sets ────────────────────────────────────────────
     seen_album_ids: set[int] = set()
     seen_song_ids: set[int] = set()
 
     for r in reviews:
-        if r.album_id:
-            seen_album_ids.add(r.album_id)
-        if r.song_id:
-            seen_song_ids.add(r.song_id)
+        if r.album_id: seen_album_ids.add(r.album_id)
+        if r.song_id:  seen_song_ids.add(r.song_id)
 
     for s in album_statuses:
         seen_album_ids.add(s.album_id)
@@ -348,34 +381,71 @@ async def my_recommendations(
     list_ids = [r[0] for r in db.query(models.List.id).filter_by(user_id=uid).all()]
     if list_ids:
         for li in db.query(models.ListItem).filter(models.ListItem.list_id.in_(list_ids)).all():
-            if li.album_id:
-                seen_album_ids.add(li.album_id)
-            if li.song_id:
-                seen_song_ids.add(li.song_id)
+            if li.album_id: seen_album_ids.add(li.album_id)
+            if li.song_id:  seen_song_ids.add(li.song_id)
 
     profile_size = len(reviews) + len(album_statuses) + len(song_statuses)
 
-    if profile_size >= _MIN_PROFILE_SIZE:
-        fp = _profile_fingerprint(reviews, album_statuses, song_statuses)
+    # ── Parse user music preferences ──────────────────────────────────────────
+    try:
+        preferences: dict = json.loads(current_user.music_preferences or '{}')
+    except Exception:
+        preferences = {}
 
-        # 1. Cached taste embedding — serve instantly, zero network calls
+    pref_genres    = preferences.get('genres', [])
+    pref_moods     = preferences.get('moods', [])
+    pref_free_text = preferences.get('free_text', '').strip()
+
+    # Build one text string per preference cluster for diverse embeddings
+    interest_texts = (
+        [f"Music genre: {g}" for g in pref_genres]
+        + [f"Music vibe and mood: {m}" for m in pref_moods]
+        + ([pref_free_text] if pref_free_text else [])
+    )
+
+    # ── Fetch preference cluster embeddings (cached in-process) ───────────────
+    pref_vecs: list[list[float]] = []
+    if interest_texts:
+        from ..embeddings import get_embedding as _ge
+        raw = await asyncio.gather(*[_ge(t) for t in interest_texts])
+        pref_vecs = [v for v in raw if v is not None]
+
+    # ── Helper: run vector queries for each cluster then round-robin merge ─────
+    def _exec_multi(all_vecs: list, src: str):
+        per = max(album_limit, song_limit) + 3
+        album_sets, song_sets = [], []
+        for vec in all_vecs:
+            albs, sngs = _vector_recs(db, vec, seen_album_ids, seen_song_ids, per, per)
+            album_sets.append(albs)
+            song_sets.append(sngs)
+        return (
+            _round_robin_merge(album_sets, album_limit),
+            _round_robin_merge(song_sets, song_limit),
+            src,
+        )
+
+    # ── Taste embedding path ───────────────────────────────────────────────────
+    taste_vec: Optional[list[float]] = None
+    if profile_size >= _MIN_PROFILE_SIZE:
+        fp = _profile_fingerprint(reviews, album_statuses, song_statuses, preferences or None)
         taste_vec = _get_cached_embedding(current_user, fp)
 
-        # If stale or missing, enqueue a background refresh for the next request
         if taste_vec is None:
-            taste_text = _build_taste_text(reviews, album_statuses, song_statuses)
+            taste_text = _build_taste_text(reviews, album_statuses, song_statuses, preferences or None)
             if taste_text != "Music taste profile:":
                 background_tasks.add_task(_refresh_taste_embedding_bg, uid, taste_text, fp)
 
-        if taste_vec:
-            albums, songs = _vector_recs(
-                db, taste_vec,
-                seen_album_ids, seen_song_ids,
-                album_limit, song_limit,
-            )
-            return {"albums": albums, "songs": songs, "source": "embedding", "profile_size": profile_size}
+    if taste_vec:
+        all_vecs = [taste_vec] + pref_vecs
+        if len(all_vecs) >= 2:
+            albums, songs, src = _exec_multi(all_vecs, "preferences")
+        else:
+            albums, songs = _vector_recs(db, taste_vec, seen_album_ids, seen_song_ids, album_limit, song_limit)
+            src = "embedding"
+        return {"albums": albums, "songs": songs, "source": src, "profile_size": profile_size}
 
-        # 2. Weighted centroid of stored item embeddings — personalized, no OpenAI needed
+    # ── Weighted centroid from item embeddings ────────────────────────────────
+    if profile_size >= _MIN_PROFILE_SIZE:
         profile_vecs: list[list[float]] = []
         profile_weights: list[float] = []
         for rev in reviews:
@@ -399,15 +469,23 @@ async def my_recommendations(
         if len(profile_vecs) >= _MIN_PROFILE_SIZE:
             centroid = _weighted_centroid(profile_vecs, profile_weights)
             if centroid:
-                albums, songs = _vector_recs(
-                    db, centroid,
-                    seen_album_ids, seen_song_ids,
-                    album_limit, song_limit,
-                )
-                return {"albums": albums, "songs": songs, "source": "centroid", "profile_size": profile_size}
+                all_vecs = [centroid] + pref_vecs
+                if len(all_vecs) >= 2:
+                    albums, songs, src = _exec_multi(all_vecs, "preferences")
+                else:
+                    albums, songs = _vector_recs(db, centroid, seen_album_ids, seen_song_ids, album_limit, song_limit)
+                    src = "centroid"
+                return {"albums": albums, "songs": songs, "source": src, "profile_size": profile_size}
 
-    # 3. Community top-rated fallback
-    albums, songs = _fallback_recs(
-        db, seen_album_ids, seen_song_ids, album_limit, song_limit
-    )
+    # ── Preferences-only path (no listening history yet) ─────────────────────
+    if pref_vecs:
+        if len(pref_vecs) >= 2:
+            albums, songs, src = _exec_multi(pref_vecs, "preferences")
+        else:
+            albums, songs = _vector_recs(db, pref_vecs[0], seen_album_ids, seen_song_ids, album_limit, song_limit)
+            src = "preferences"
+        return {"albums": albums, "songs": songs, "source": src, "profile_size": profile_size}
+
+    # ── Community top-rated fallback ──────────────────────────────────────────
+    albums, songs = _fallback_recs(db, seen_album_ids, seen_song_ids, album_limit, song_limit)
     return {"albums": albums, "songs": songs, "source": "fallback", "profile_size": profile_size}

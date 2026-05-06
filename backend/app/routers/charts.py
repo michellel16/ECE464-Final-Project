@@ -18,16 +18,32 @@ def top_albums(
     skip: int = 0,
     db: Session = Depends(get_db),
 ):
-    q = (
-        db.query(
-            models.Album.id,
-            func.avg(models.Review.rating).label("avg_rating"),
-            func.count(models.Review.id).label("review_count"),
+    has_filter = bool(year or decade or genre_id)
+
+    if has_filter:
+        # When filtering: LEFT JOIN so albums without reviews still appear,
+        # coalesce NULL avg to 0 so they sort to the bottom.
+        q = (
+            db.query(
+                models.Album.id,
+                func.coalesce(func.avg(models.Review.rating), 0).label("avg_rating"),
+                func.count(models.Review.id).label("review_count"),
+            )
+            .outerjoin(models.Review, models.Review.album_id == models.Album.id)
+            .group_by(models.Album.id)
         )
-        .join(models.Review, models.Review.album_id == models.Album.id)
-        .group_by(models.Album.id)
-        .having(func.count(models.Review.id) >= 1)
-    )
+    else:
+        # Default chart: only albums that have been reviewed
+        q = (
+            db.query(
+                models.Album.id,
+                func.avg(models.Review.rating).label("avg_rating"),
+                func.count(models.Review.id).label("review_count"),
+            )
+            .join(models.Review, models.Review.album_id == models.Album.id)
+            .group_by(models.Album.id)
+            .having(func.count(models.Review.id) >= 1)
+        )
 
     if year:
         q = q.filter(models.Album.release_date.like(f"{year}%"))
@@ -46,7 +62,10 @@ def top_albums(
         q = q.filter(models.Album.id.in_(genre_sub))
 
     rows = (
-        q.order_by(func.avg(models.Review.rating).desc(), func.count(models.Review.id).desc())
+        q.order_by(
+            func.coalesce(func.avg(models.Review.rating), 0).desc(),
+            func.count(models.Review.id).desc(),
+        )
         .offset(skip).limit(limit)
         .all()
     )

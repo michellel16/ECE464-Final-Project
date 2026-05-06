@@ -138,6 +138,24 @@ export default function Profile() {
               )}
             </h1>
             {profile.bio && <p className="text-gray-400 mt-1 text-sm">{profile.bio}</p>}
+            {/* Music preference tags */}
+            {(profile.music_preferences?.genres?.length > 0 || profile.music_preferences?.moods?.length > 0) && (
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {profile.music_preferences.genres?.map(g => (
+                  <span key={g} className="text-[11px] bg-violet-900/30 text-violet-400 border border-violet-800/40 rounded-full px-2 py-0.5">
+                    {g}
+                  </span>
+                ))}
+                {profile.music_preferences.moods?.map(m => (
+                  <span key={m} className="text-[11px] bg-pink-900/20 text-pink-400 border border-pink-800/30 rounded-full px-2 py-0.5">
+                    {m}
+                  </span>
+                ))}
+              </div>
+            )}
+            {profile.music_preferences?.free_text && (
+              <p className="text-gray-500 text-xs mt-1 italic">"{profile.music_preferences.free_text}"</p>
+            )}
             <div className="flex gap-5 mt-3 text-sm text-gray-400">
               <button onClick={() => setFollowModal('followers')} className="hover:text-white transition-colors">
                 <strong className="text-white">{profile.follower_count ?? 0}</strong> followers
@@ -1044,6 +1062,16 @@ function ImportModal({ onClose }) {
 
 // ── Edit Profile Modal ────────────────────────────────────────────────────────
 
+const POPULAR_GENRES = [
+  'Pop', 'Rock', 'Hip-Hop', 'R&B', 'Electronic', 'Indie', 'Alternative',
+  'Jazz', 'Classical', 'Country', 'Folk', 'Metal', 'Soul', 'Latin',
+]
+
+const MOOD_OPTIONS = [
+  'Chill', 'Energetic', 'Melancholic', 'Upbeat', 'Relaxed', 'Intense',
+  'Romantic', 'Party', 'Late Night', 'Focus', 'Feel-Good', 'Dark', 'Nostalgic', 'Dreamy',
+]
+
 function EditProfileModal({ profile, onClose, onSaved }) {
   const [username, setUsername]     = useState(profile.username)
   const [bio, setBio]               = useState(profile.bio ?? '')
@@ -1054,6 +1082,29 @@ function EditProfileModal({ profile, onClose, onSaved }) {
   const [avatarUploading, setAvatarUploading] = useState(false)
   const [avatarError, setAvatarError] = useState(null)
   const fileInputRef = useRef(null)
+
+  // Music preferences state
+  const [availableGenres, setAvailableGenres] = useState([])
+  const [selectedGenres, setSelectedGenres]   = useState(profile.music_preferences?.genres ?? [])
+  const [selectedMoods, setSelectedMoods]     = useState(profile.music_preferences?.moods ?? [])
+  const [prefFreeText, setPrefFreeText]       = useState(profile.music_preferences?.free_text ?? '')
+  const [genreSearch, setGenreSearch]         = useState('')
+
+  useEffect(() => {
+    axios.get('/api/charts/genres').then(r => setAvailableGenres(r.data)).catch(() => {})
+  }, [])
+
+  function toggleGenre(name) {
+    setSelectedGenres(prev =>
+      prev.includes(name) ? prev.filter(g => g !== name) : [...prev, name]
+    )
+  }
+
+  function toggleMood(name) {
+    setSelectedMoods(prev =>
+      prev.includes(name) ? prev.filter(m => m !== name) : [...prev, name]
+    )
+  }
 
   async function handleAvatarChange(e) {
     const file = e.target.files?.[0]
@@ -1080,12 +1131,27 @@ function EditProfileModal({ profile, onClose, onSaved }) {
     setSaving(true)
     setError(null)
     try {
-      const { data } = await axios.put('/api/users/me/profile', {
-        username: trimmed,
-        bio: bio.trim() || null,
-        is_private: isPrivate,
+      const [profileRes] = await Promise.all([
+        axios.put('/api/users/me/profile', {
+          username: trimmed,
+          bio: bio.trim() || null,
+          is_private: isPrivate,
+        }),
+        axios.put('/api/users/me/preferences', {
+          genres: selectedGenres,
+          moods: selectedMoods,
+          free_text: prefFreeText.trim(),
+        }),
+      ])
+      const data = profileRes.data
+      const newPrefs = { genres: selectedGenres, moods: selectedMoods, free_text: prefFreeText.trim() }
+      onSaved({
+        username: data.username,
+        bio: data.bio,
+        avatar_url: data.avatar_url,
+        is_private: data.is_private,
+        music_preferences: newPrefs,
       })
-      onSaved({ username: data.username, bio: data.bio, avatar_url: data.avatar_url, is_private: data.is_private })
     } catch (e) {
       setError(e.response?.data?.detail || 'Save failed')
     } finally {
@@ -1095,12 +1161,12 @@ function EditProfileModal({ profile, onClose, onSaved }) {
 
   return (
     <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-md shadow-2xl">
-        <div className="flex items-center justify-between p-5 border-b border-gray-800">
+      <div className="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-md shadow-2xl flex flex-col max-h-[90vh]">
+        <div className="flex items-center justify-between p-5 border-b border-gray-800 shrink-0">
           <h2 className="font-bold text-white text-lg">Edit Profile</h2>
           <button onClick={onClose} className="text-gray-500 hover:text-white text-xl leading-none">&times;</button>
         </div>
-        <div className="p-5 space-y-4">
+        <div className="p-5 space-y-4 overflow-y-auto flex-1">
           {/* Avatar picker */}
           <div className="flex flex-col items-center gap-2">
             <button
@@ -1157,6 +1223,124 @@ function EditProfileModal({ profile, onClose, onSaved }) {
               maxLength={300}
             />
           </div>
+
+          {/* Music Taste Preferences */}
+          <div className="border-t border-gray-800 pt-4 space-y-4">
+            <p className="text-sm font-medium text-white">Music Taste</p>
+
+            <div>
+              <label className="block text-xs text-gray-400 mb-2">Favorite Genres</label>
+
+              {/* Popular genres as quick-pick chips */}
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {POPULAR_GENRES.map(name => (
+                  <button
+                    key={name}
+                    type="button"
+                    onClick={() => toggleGenre(name)}
+                    className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
+                      selectedGenres.includes(name)
+                        ? 'bg-violet-600 text-white'
+                        : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200'
+                    }`}
+                  >
+                    {name}
+                  </button>
+                ))}
+              </div>
+
+              {/* Selected non-popular genres */}
+              {selectedGenres.filter(g => !POPULAR_GENRES.includes(g)).length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {selectedGenres.filter(g => !POPULAR_GENRES.includes(g)).map(name => (
+                    <button
+                      key={name}
+                      type="button"
+                      onClick={() => toggleGenre(name)}
+                      className="px-2.5 py-1 rounded-full text-xs font-medium bg-violet-600 text-white flex items-center gap-1 hover:bg-violet-700 transition-colors"
+                    >
+                      {name} <span className="text-violet-200 leading-none">×</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Search for more genres */}
+              <div className="relative">
+                <input
+                  type="text"
+                  className="input w-full text-sm"
+                  placeholder="Search more genres…"
+                  value={genreSearch}
+                  onChange={e => setGenreSearch(e.target.value)}
+                />
+                {genreSearch.trim() && (
+                  <div className="absolute z-10 left-0 right-0 bg-gray-800 border border-gray-700 rounded-lg mt-1 max-h-40 overflow-y-auto shadow-xl">
+                    {availableGenres
+                      .filter(g =>
+                        !POPULAR_GENRES.includes(g.name) &&
+                        g.name.toLowerCase().includes(genreSearch.toLowerCase().trim())
+                      )
+                      .slice(0, 20)
+                      .map(g => (
+                        <button
+                          key={g.id}
+                          type="button"
+                          onClick={() => { toggleGenre(g.name); setGenreSearch('') }}
+                          className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-700 transition-colors flex items-center justify-between ${
+                            selectedGenres.includes(g.name) ? 'text-violet-400' : 'text-gray-300'
+                          }`}
+                        >
+                          {g.name}
+                          {selectedGenres.includes(g.name) && <span className="text-violet-400 text-xs">✓</span>}
+                        </button>
+                      ))
+                    }
+                    {availableGenres.filter(g =>
+                      !POPULAR_GENRES.includes(g.name) &&
+                      g.name.toLowerCase().includes(genreSearch.toLowerCase().trim())
+                    ).length === 0 && (
+                      <p className="px-3 py-2 text-sm text-gray-500">No genres found</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs text-gray-400 mb-2">Vibes</label>
+              <div className="flex flex-wrap gap-1.5">
+                {MOOD_OPTIONS.map(m => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => toggleMood(m)}
+                    className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
+                      selectedMoods.includes(m)
+                        ? 'bg-pink-700/80 text-pink-100'
+                        : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200'
+                    }`}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Describe your taste <span className="text-gray-600">(optional)</span></label>
+              <textarea
+                className="input w-full resize-none text-sm"
+                rows={2}
+                value={prefFreeText}
+                onChange={e => setPrefFreeText(e.target.value)}
+                placeholder="e.g. I love lo-fi indie, sad girl vibes, 70s classics…"
+                maxLength={300}
+              />
+              <p className="text-xs text-gray-600 mt-0.5">{prefFreeText.length}/300 · Used to improve recommendations</p>
+            </div>
+          </div>
+
           <div className="flex items-center justify-between py-1">
             <div>
               <p className="text-sm text-white font-medium">Private Account</p>
@@ -1172,7 +1356,7 @@ function EditProfileModal({ profile, onClose, onSaved }) {
           </div>
           {error && <p className="text-red-400 text-sm">{error}</p>}
         </div>
-        <div className="flex justify-end gap-2 p-5 pt-0">
+        <div className="flex justify-end gap-2 p-5 border-t border-gray-800 shrink-0">
           <button onClick={onClose} className="btn-secondary text-sm">Cancel</button>
           <button onClick={save} disabled={saving || avatarUploading} className="btn-primary text-sm disabled:opacity-50">
             {saving ? 'Saving…' : 'Save'}
