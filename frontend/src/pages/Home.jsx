@@ -10,6 +10,7 @@ export default function Home() {
   const [albums, setAlbums]                     = useState([])
   const [artists, setArtists]                   = useState([])
   const [songs, setSongs]                       = useState([])
+  const [newReleases, setNewReleases]           = useState([])
   const [feed, setFeed]                         = useState([])
   const [recommended, setRecommended]           = useState([])
   const [recommendedArtists, setRecArtists]     = useState([])
@@ -25,10 +26,12 @@ export default function Home() {
       axios.get('/api/music/albums?limit=12&sort=recently_reviewed'),
       axios.get('/api/music/artists?limit=12&sort=recently_reviewed'),
       axios.get('/api/music/songs?limit=6&sort=recently_reviewed'),
-    ]).then(([albumsRes, artistsRes, songsRes]) => {
+      axios.get('/api/music/albums?limit=6&sort=new_releases'),
+    ]).then(([albumsRes, artistsRes, songsRes, newReleasesRes]) => {
       setAlbums(albumsRes.data)
       setArtists(artistsRes.data)
       setSongs(songsRes.data)
+      setNewReleases(newReleasesRes.data)
     }).finally(() => setLoading(false))
 
     if (user) {
@@ -93,6 +96,22 @@ export default function Home() {
         </div>
       </section>
 
+      {/* New Releases */}
+      {newReleases.length > 0 && (
+        <section>
+          <div className="flex items-center justify-between mb-5">
+            <div>
+              <h2 className="text-xl font-bold text-white">New Releases</h2>
+              <p className="text-gray-500 text-sm mt-0.5">Latest albums added to Tunelog</p>
+            </div>
+            <Link to="/charts" className="text-sm text-violet-400 hover:text-violet-300 transition-colors">Charts →</Link>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
+            {newReleases.map(a => <AlbumCard key={a.id} album={a} />)}
+          </div>
+        </section>
+      )}
+
       {/* Songs */}
       <section>
         <SectionHeader title="Recently Reviewed Songs" href="/discover?tab=songs" />
@@ -110,12 +129,14 @@ export default function Home() {
               <p className="text-gray-500 text-sm mt-0.5">
                 {forYouSource === 'embedding'
                   ? 'Matched to your taste using semantic similarity'
+                  : forYouSource === 'centroid'
+                  ? 'Based on your listening history'
                   : 'Top picks from the Tunelog community'}
               </p>
             </div>
-            {forYouSource === 'embedding' && (
+            {(forYouSource === 'embedding' || forYouSource === 'centroid') && (
               <span className="text-xs text-violet-400/70 bg-violet-900/20 border border-violet-800/40 rounded-full px-3 py-1">
-                AI-powered
+                {forYouSource === 'embedding' ? 'AI-powered' : 'Personalized'}
               </span>
             )}
           </div>
@@ -133,6 +154,8 @@ export default function Home() {
             <p className="text-gray-500 text-sm mt-0.5">
               {forYouSource === 'embedding'
                 ? 'Discovered via your taste profile'
+                : forYouSource === 'centroid'
+                ? 'Based on your listening history'
                 : 'Trending on Tunelog'}
             </p>
           </div>

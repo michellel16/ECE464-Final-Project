@@ -2,13 +2,27 @@ import { useState, useEffect } from 'react'
 import { useSearchParams, Link } from 'react-router-dom'
 import axios from 'axios'
 import AlbumCard from '../components/AlbumCard'
+import { Avatar } from '../components/Navbar'
+import { useAuth } from '../contexts/AuthContext'
+
+const LIST_TYPE_LABELS = {
+  custom: 'Custom', listened: 'Listened',
+  want_to_listen: 'Want to Listen', favorites: 'Favorites',
+}
 
 export default function Discover() {
   const [searchParams] = useSearchParams()
+  const { user } = useAuth()
   const [albums, setAlbums]   = useState([])
   const [artists, setArtists] = useState([])
   const [songs, setSongs]     = useState([])
-  const [tab, setTab]         = useState(searchParams.get('tab') ?? 'albums')
+  const [lists, setLists]     = useState([])
+  const [likeState, setLikeState]   = useState({})
+  const [listSort, setListSort]     = useState('trending')
+  const [listsLoading, setListsLoading] = useState(false)
+  const [forking, setForking]       = useState(null)
+  const [copied, setCopied]         = useState(null)
+  const [tab, setTab]   = useState(searchParams.get('tab') ?? 'albums')
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -23,7 +37,51 @@ export default function Discover() {
     }).finally(() => setLoading(false))
   }, [])
 
+  useEffect(() => {
+    if (tab !== 'lists') return
+    setListsLoading(true)
+    setLists([])
+    axios.get(`/api/lists/top?limit=24&sort=${listSort}`)
+      .then(r => {
+        setLists(r.data)
+        const state = {}
+        r.data.forEach(l => { state[l.id] = { liked: l.is_liked, count: l.like_count } })
+        setLikeState(s => ({ ...s, ...state }))
+      })
+      .finally(() => setListsLoading(false))
+  }, [tab, listSort])
+
+  async function toggleLike(listId) {
+    if (!user) return
+    const prev = likeState[listId] ?? { liked: false, count: 0 }
+    setLikeState(s => ({
+      ...s,
+      [listId]: { liked: !prev.liked, count: prev.count + (prev.liked ? -1 : 1) },
+    }))
+    try {
+      await axios.post(`/api/lists/${listId}/like`)
+    } catch {
+      setLikeState(s => ({ ...s, [listId]: prev }))
+    }
+  }
+
+  async function forkList(listId) {
+    if (!user || forking) return
+    setForking(listId)
+    try {
+      await axios.post(`/api/lists/${listId}/fork`)
+      setCopied(listId)
+      setTimeout(() => setCopied(null), 3000)
+    } catch {
+      // silent — list might already be owned by user
+    } finally {
+      setForking(null)
+    }
+  }
+
   if (loading) return <Loader />
+
+  const TABS = ['albums', 'artists', 'songs', 'lists']
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8 space-y-6">
@@ -33,7 +91,7 @@ export default function Discover() {
       </div>
 
       <div className="flex gap-1 bg-gray-900 rounded-xl p-1 w-fit">
-        {['albums', 'artists', 'songs'].map(t => (
+        {TABS.map(t => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -63,6 +121,163 @@ export default function Discover() {
           {songs.map(s => <SongRow key={s.id} song={s} />)}
         </div>
       )}
+
+      {tab === 'lists' && (
+        <div className="space-y-5">
+          {/* Sort toggle + description */}
+          <div className="flex items-center gap-4 flex-wrap">
+            <div className="flex gap-1 bg-gray-900 rounded-xl p-1">
+              {[
+                ['trending', '🔥 Trending'],
+                ['top',      '⭐ All Time Best'],
+              ].map(([key, label]) => (
+                <button
+                  key={key}
+                  onClick={() => setListSort(key)}
+                  className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                    listSort === key
+                      ? 'bg-violet-600 text-white'
+                      : 'text-gray-400 hover:text-white'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <p className="text-gray-500 text-sm">
+              {listSort === 'trending'
+                ? 'Most saves in the last 30 days'
+                : 'Most saved lists of all time'}
+            </p>
+          </div>
+
+          {copied && (
+            <div className="bg-violet-900/30 border border-violet-700/50 text-violet-300 text-sm px-4 py-2.5 rounded-lg">
+              List copied to your account — find it in <Link to="/lists" className="underline">My Lists</Link> to edit it.
+            </div>
+          )}
+
+          {listsLoading ? (
+            <Loader />
+          ) : lists.length === 0 ? (
+            <div className="card p-12 text-center text-gray-500">
+              <p className="text-lg mb-1">No public lists yet</p>
+              <p className="text-sm">Be the first to create and share a list!</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {lists.map(l => (
+                <ListCard
+                  key={l.id}
+                  list={l}
+                  likeState={likeState[l.id]}
+                  onLike={toggleLike}
+                  onFork={forkList}
+                  forking={forking}
+                  copied={copied === l.id}
+                  currentUser={user}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ListCard({ list, likeState, onLike, onFork, forking, copied, currentUser }) {
+  const { liked, count } = likeState ?? { liked: list.is_liked, count: list.like_count }
+  const covers  = list.cover_previews ?? []
+  const isOwner = currentUser?.username === list.owner_username
+  const canAct  = currentUser && !isOwner
+  const isBusy  = forking === list.id
+
+  return (
+    <div className="card overflow-hidden">
+      {/* Cover collage — clickable, links to detail page */}
+      <Link to={`/lists/${list.id}`} className="block h-28 bg-gray-800 shrink-0 overflow-hidden group">
+        {covers.length === 0 ? (
+          <div className="w-full h-full flex items-center justify-center text-3xl text-gray-700">♪</div>
+        ) : covers.length === 1 ? (
+          <img src={covers[0]} alt="" className="w-full h-full object-cover group-hover:opacity-90 transition-opacity" loading="lazy" />
+        ) : covers.length < 4 ? (
+          <div className="grid grid-cols-2 h-full">
+            {covers.slice(0, 2).map((url, i) => (
+              <img key={i} src={url} alt="" className="w-full h-full object-cover group-hover:opacity-90 transition-opacity" loading="lazy" />
+            ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 grid-rows-2 h-full">
+            {covers.slice(0, 4).map((url, i) => (
+              <img key={i} src={url} alt="" className="w-full h-full object-cover group-hover:opacity-90 transition-opacity" loading="lazy" />
+            ))}
+          </div>
+        )}
+      </Link>
+
+      {/* Content — completely separate from cover */}
+      <div className="p-3 space-y-2">
+        {/* Title (clickable) + type badge on same row */}
+        <div className="flex items-start gap-2">
+          <Link to={`/lists/${list.id}`} className="text-white hover:text-violet-400 transition-colors font-medium text-sm leading-snug line-clamp-1 flex-1">
+            {list.name}
+          </Link>
+          <span className="text-[10px] text-gray-500 border border-gray-700 px-1.5 py-0.5 rounded-full shrink-0 leading-none mt-0.5">
+            {LIST_TYPE_LABELS[list.list_type] ?? list.list_type}
+          </span>
+        </div>
+
+        {/* Owner row */}
+        <div className="flex items-center gap-2">
+          <Link
+            to={`/users/${list.owner_username}`}
+            className="flex items-center gap-1.5 min-w-0 flex-1"
+            onClick={e => e.stopPropagation()}
+          >
+            <Avatar username={list.owner_username} avatarUrl={list.owner_avatar_url} size={4} />
+            <span className="text-violet-400 text-xs hover:text-violet-300 transition-colors truncate">
+              {list.owner_username}
+            </span>
+          </Link>
+          <span className="text-gray-600 text-xs shrink-0">
+            {list.item_count} item{list.item_count !== 1 ? 's' : ''}
+          </span>
+        </div>
+
+        {/* Actions */}
+        {canAct ? (
+          <div className="flex gap-1.5 pt-0.5">
+            <button
+              onClick={() => onLike(list.id)}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold transition-all ${
+                liked
+                  ? 'bg-pink-600/20 border border-pink-500/40 text-pink-400 hover:bg-pink-600/30'
+                  : 'bg-gray-800/80 border border-gray-700 text-gray-300 hover:border-pink-500/40 hover:text-pink-400'
+              }`}
+            >
+              <span className="leading-none">{liked ? '♥' : '♡'}</span>
+              {liked ? 'Saved' : 'Save'}
+              {count > 0 && <span className="text-[11px] opacity-60">· {count}</span>}
+            </button>
+
+            <button
+              onClick={() => onFork(list.id)}
+              disabled={isBusy || !!copied}
+              className={`flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-medium border transition-all disabled:opacity-50 ${
+                copied
+                  ? 'border-violet-500/40 text-violet-400 bg-violet-900/20'
+                  : 'border-gray-700 text-gray-400 bg-gray-800/80 hover:border-violet-500/40 hover:text-violet-400'
+              }`}
+              title="Save an editable copy to your lists"
+            >
+              {copied ? '✓' : isBusy ? '…' : '⎘ Copy'}
+            </button>
+          </div>
+        ) : count > 0 && (
+          <p className="text-xs text-gray-600">♥ {count} {count === 1 ? 'save' : 'saves'}</p>
+        )}
+      </div>
     </div>
   )
 }

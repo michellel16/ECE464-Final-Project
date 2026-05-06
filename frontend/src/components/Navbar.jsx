@@ -1,5 +1,6 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
+import axios from 'axios'
 import { useAuth } from '../contexts/AuthContext'
 
 const HISTORY_KEY = 'tunelog_search_history'
@@ -21,18 +22,47 @@ export default function Navbar() {
   const [menuOpen, setMenu]     = useState(false)
   const [showHistory, setShowHistory] = useState(false)
   const [history, setHistory]   = useState(loadHistory)
+  const [unreadCount, setUnreadCount] = useState(0)
+  const [bellOpen, setBellOpen]       = useState(false)
+  const [bellRecs, setBellRecs]       = useState([])
+  const [bellLoading, setBellLoading] = useState(false)
   const menuRef   = useRef(null)
   const searchRef = useRef(null)
+  const bellRef   = useRef(null)
 
-  // Close dropdown on outside click
+  // Close dropdowns on outside click
   useEffect(() => {
     function handler(e) {
-      if (menuRef.current && !menuRef.current.contains(e.target)) setMenu(false)
+      if (menuRef.current   && !menuRef.current.contains(e.target))   setMenu(false)
       if (searchRef.current && !searchRef.current.contains(e.target)) setShowHistory(false)
+      if (bellRef.current   && !bellRef.current.contains(e.target))   setBellOpen(false)
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [])
+
+  // Fetch unread recommendation count
+  useEffect(() => {
+    if (!user) { setUnreadCount(0); return }
+    axios.get('/api/social/recommendations/unread-count')
+      .then(r => setUnreadCount(r.data.count))
+      .catch(() => {})
+  }, [user])
+
+  async function openBell() {
+    if (bellOpen) { setBellOpen(false); return }
+    setBellOpen(true)
+    setBellLoading(true)
+    try {
+      const { data } = await axios.get('/api/social/recommendations')
+      setBellRecs(data.slice(0, 6))
+      if (unreadCount > 0) {
+        await axios.post('/api/social/recommendations/read-all')
+        setUnreadCount(0)
+      }
+    } catch {}
+    finally { setBellLoading(false) }
+  }
 
   function addToHistory(term) {
     const trimmed = term.trim()
@@ -145,9 +175,83 @@ export default function Navbar() {
         {/* Nav links */}
         <div className="hidden md:flex items-center gap-5">
           {navLink('/discover', 'Discover')}
+          {navLink('/charts', 'Charts')}
           {user && navLink('/lists', 'My Lists')}
           {user && navLink('/stats', 'Stats')}
         </div>
+
+        {/* Recommendation bell */}
+        {user && (
+          <div className="relative shrink-0" ref={bellRef}>
+            <button
+              onClick={openBell}
+              className="relative p-2 text-gray-400 hover:text-white transition-colors"
+              title="Recommendations"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+              </svg>
+              {unreadCount > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 bg-pink-500 text-white text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center leading-none">
+                  {unreadCount > 9 ? '9+' : unreadCount}
+                </span>
+              )}
+            </button>
+
+            {bellOpen && (
+              <div className="absolute right-0 mt-2 w-80 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl overflow-hidden z-50">
+                <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
+                  <span className="text-sm font-semibold text-white">Recommendations</span>
+                  <Link
+                    to={`/users/${user.username}`}
+                    onClick={() => setBellOpen(false)}
+                    className="text-xs text-violet-400 hover:text-violet-300 transition-colors"
+                  >
+                    View all
+                  </Link>
+                </div>
+                {bellLoading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <div className="w-5 h-5 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
+                  </div>
+                ) : bellRecs.length === 0 ? (
+                  <p className="text-gray-500 text-sm text-center py-8 px-4">No recommendations yet.</p>
+                ) : (
+                  <div className="divide-y divide-gray-800/60 max-h-72 overflow-y-auto">
+                    {bellRecs.map(rec => {
+                      const item = rec.song ?? rec.album
+                      const href = item ? `/${rec.song ? 'songs' : 'albums'}/${item.id}` : null
+                      return (
+                        <Link
+                          key={rec.id}
+                          to={href ?? '#'}
+                          onClick={() => setBellOpen(false)}
+                          className="flex items-center gap-3 px-4 py-3 hover:bg-gray-800 transition-colors"
+                        >
+                          {item?.cover_url ? (
+                            <img src={item.cover_url} alt="" className="w-9 h-9 rounded shrink-0 object-cover" />
+                          ) : (
+                            <div className="w-9 h-9 rounded bg-gray-800 flex items-center justify-center text-gray-500 shrink-0 text-sm">
+                              {rec.song ? '♪' : '💿'}
+                            </div>
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <p className="text-white text-xs font-medium truncate">{item?.title ?? '—'}</p>
+                            <p className="text-gray-500 text-xs truncate">
+                              from <span className="text-violet-400">{rec.sender_username}</span>
+                            </p>
+                            {rec.note && <p className="text-gray-600 text-xs truncate italic">"{rec.note}"</p>}
+                          </div>
+                        </Link>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Auth */}
         <div className="ml-auto shrink-0">

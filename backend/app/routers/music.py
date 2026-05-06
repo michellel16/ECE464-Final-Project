@@ -551,6 +551,15 @@ def list_albums(skip: int = 0, limit: int = 30, sort: Optional[str] = None, db: 
             .all()
         )}
         albums = [id_map[i] for i in ordered_ids if i in id_map]
+    elif sort == 'new_releases':
+        albums = (
+            db.query(models.Album)
+            .options(joinedload(models.Album.artist), joinedload(models.Album.genres))
+            .filter(models.Album.release_date.isnot(None))
+            .order_by(models.Album.release_date.desc())
+            .offset(skip).limit(limit)
+            .all()
+        )
     else:
         albums = (
             db.query(models.Album)

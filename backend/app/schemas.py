@@ -133,6 +133,8 @@ class ListCreate(BaseModel):
     description: Optional[str] = None
     list_type: str = "custom"
     is_public: bool = True
+    cover_url: Optional[str] = None
+    group_name: Optional[str] = None
 
 
 class ListItemCreate(BaseModel):

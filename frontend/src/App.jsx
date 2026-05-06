@@ -11,7 +11,9 @@ import AlbumPage  from './pages/AlbumPage'
 import SongPage   from './pages/SongPage'
 import Profile    from './pages/Profile'
 import Lists      from './pages/Lists'
+import ListDetail from './pages/ListDetail'
 import Stats      from './pages/Stats'
+import Charts     from './pages/Charts'
 
 function Protected({ children }) {
   const { user, loading } = useAuth()
@@ -46,7 +48,9 @@ function AppRoutes() {
           <Route path="/songs/:id"       element={<SongPage />} />
           <Route path="/users/:username" element={<Profile />} />
           <Route path="/lists"           element={<Protected><Lists /></Protected>} />
+          <Route path="/lists/:id"       element={<ListDetail />} />
           <Route path="/stats"           element={<Protected><Stats /></Protected>} />
+          <Route path="/charts"          element={<Charts />} />
           <Route path="*"                element={<Navigate to="/" replace />} />
         </Routes>
       </main>

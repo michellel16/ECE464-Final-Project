@@ -116,6 +116,8 @@ class User(Base):
     spotify_token_expires_at  = Column(DateTime,    nullable=True)
     spotify_display_name      = Column(String(100), nullable=True)
     spotify_image_url         = Column(String,      nullable=True)
+    taste_embedding           = Column(Vector(1536), nullable=True)
+    taste_profile_hash        = Column(String(64),   nullable=True)
 
     reviews       = relationship("Review",          back_populates="user")
     lists         = relationship("List",            back_populates="user")
@@ -191,6 +193,8 @@ class List(Base):
     description = Column(Text,    nullable=True)
     list_type   = Column(String(50), default="custom")   # listened | want_to_listen | favorites | custom
     is_public   = Column(Boolean, default=True)
+    cover_url   = Column(String,      nullable=True)
+    group_name  = Column(String(100), nullable=True)
     created_at  = Column(DateTime, default=datetime.utcnow)
 
     user  = relationship("User",     back_populates="lists")
@@ -236,6 +240,16 @@ class UserAlbumStatus(Base):
 
 
 # ── Social extras ────────────────────────────────────────────────────────────
+
+class ListLike(Base):
+    __tablename__ = "list_likes"
+    user_id    = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    list_id    = Column(Integer, ForeignKey("lists.id", ondelete="CASCADE"), primary_key=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user  = relationship("User", backref="liked_lists")
+    list_ = relationship("List", backref="likes")
+
 
 class ReviewLike(Base):
     __tablename__ = "review_likes"

@@ -1412,7 +1412,22 @@ function ReviewItem({ review }) {
 }
 
 function ListsTab({ lists, isMe }) {
+  const { user } = useAuth()
   const [selectedList, setSelectedList] = useState(null)
+  const [likeState, setLikeState] = useState(() => {
+    const map = {}
+    lists.forEach(l => { map[l.id] = { liked: l.is_liked ?? false, count: l.like_count ?? 0 } })
+    return map
+  })
+
+  async function toggleLike(listId, e) {
+    e.stopPropagation()
+    if (!user) return
+    try {
+      const { data } = await axios.post(`/api/lists/${listId}/like`)
+      setLikeState(prev => ({ ...prev, [listId]: { liked: data.liked, count: data.like_count } }))
+    } catch {}
+  }
 
   return (
     <div>
@@ -1433,7 +1448,23 @@ function ListsTab({ lists, isMe }) {
             >
               <p className="font-medium text-white group-hover:text-violet-400 transition-colors">{l.name}</p>
               {l.description && <p className="text-gray-500 text-sm mt-0.5 line-clamp-2">{l.description}</p>}
-              <p className="text-gray-600 text-xs mt-2">{l.item_count} item{l.item_count !== 1 ? 's' : ''} · {l.list_type}</p>
+              <div className="flex items-center justify-between mt-2">
+                <p className="text-gray-600 text-xs">{l.item_count} item{l.item_count !== 1 ? 's' : ''} · {l.list_type}</p>
+                <div className="flex items-center gap-1.5">
+                  {(likeState[l.id]?.count ?? 0) > 0 && (
+                    <span className="text-gray-500 text-xs">{likeState[l.id]?.count}</span>
+                  )}
+                  {user && !isMe && (
+                    <button
+                      onClick={e => toggleLike(l.id, e)}
+                      className={`text-sm transition-colors ${likeState[l.id]?.liked ? 'text-pink-400' : 'text-gray-600 hover:text-pink-400'}`}
+                      title={likeState[l.id]?.liked ? 'Unlike' : 'Like this list'}
+                    >
+                      ♥
+                    </button>
+                  )}
+                </div>
+              </div>
             </button>
           ))}
         </div>
