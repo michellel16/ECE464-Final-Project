@@ -92,22 +92,22 @@ def _wait_for_db(timeout: int = 30) -> bool:
     return False
 
 
-@app.on_event("startup")
-async def on_startup():
+async def _startup_tasks():
+    """All heavy startup work runs here in a background task so the server
+    starts accepting requests immediately instead of blocking for DB calls."""
     import asyncio
-    _wait_for_db(timeout=30)
+    from .database import SessionLocal
+    from sqlalchemy import text
 
-    # Seed only if the database is empty (tables must exist — run migrations first)
+    _wait_for_db(timeout=10)
+
     try:
         seed_database()
     except Exception as e:
         print(f"Seed skipped: {e}")
 
-    # Ensure genre associations exist — skip if artist_genre already populated
     try:
         from .routers.charts import _do_propagate_genres, _do_cleanup_genres
-        from .database import SessionLocal
-        from sqlalchemy import text
         _db = SessionLocal()
         try:
             already = _db.execute(text("SELECT 1 FROM artist_genre LIMIT 1")).fetchone()
@@ -118,14 +118,10 @@ async def on_startup():
         finally:
             _db.close()
     except Exception as e:
-        import traceback
         print(f"[startup] Genre sync skipped: {e}")
-        traceback.print_exc()
 
-    # Normalise genre names on every startup (fast, idempotent)
     try:
         from .routers.charts import _do_fix_genres
-        from .database import SessionLocal
         _db = SessionLocal()
         try:
             result = _do_fix_genres(_db)
@@ -136,8 +132,13 @@ async def on_startup():
     except Exception as e:
         print(f"[startup] Genre fix skipped: {e}")
 
-    # Image backfill runs in the background so it doesn't block server startup
-    asyncio.create_task(_backfill_images())
+    await _backfill_images()
+
+
+@app.on_event("startup")
+async def on_startup():
+    import asyncio
+    asyncio.create_task(_startup_tasks())
 
 
 @app.get("/api")

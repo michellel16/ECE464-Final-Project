@@ -526,13 +526,18 @@ async def similar_items(
 # ── Semantic (vibe) search ────────────────────────────────────────────────────
 
 @router.get("/semantic")
-async def semantic_search(q: str, db: Session = Depends(get_db)):
+async def semantic_search(q: str):
     """
     Embed the query with OpenAI text-embedding-3-small then rank artists,
     albums, and songs by cosine similarity against stored pgvector embeddings.
+
+    DB session is intentionally opened AFTER get_embedding() so a long
+    OpenAI wait (rate-limit retry) never holds a pool connection.
     """
     from ..embeddings import get_embedding
+    from ..database import SessionLocal
 
+    # Step 1: get embedding — no DB connection held while OpenAI may be slow.
     vec = await get_embedding(q)
     if vec is None:
         raise HTTPException(
@@ -540,63 +545,66 @@ async def semantic_search(q: str, db: Session = Depends(get_db)):
             detail="Embedding service unavailable — check OPENAI_API_KEY",
         )
 
-    # pgvector expects a literal like '[0.1,0.2,...]'
     vec_literal = "[" + ",".join(f"{v:.8f}" for v in vec) + "]"
 
-    artist_rows = db.execute(
-        text("""
-            SELECT id, name, image_url,
-                   1 - (embedding <=> :emb::vector) AS similarity
-            FROM artists
-            WHERE embedding IS NOT NULL
-            ORDER BY embedding <=> :emb::vector
-            LIMIT 5
-        """),
-        {"emb": vec_literal},
-    ).fetchall()
+    # Step 2: all DB work happens in a short window after embedding is ready.
+    db = SessionLocal()
+    try:
+        artist_rows = db.execute(
+            text("""
+                SELECT id, name, image_url,
+                       1 - (embedding <=> :emb::vector) AS similarity
+                FROM artists
+                WHERE embedding IS NOT NULL
+                ORDER BY embedding <=> :emb::vector
+                LIMIT 5
+            """),
+            {"emb": vec_literal},
+        ).fetchall()
 
-    album_rows = db.execute(
-        text("""
-            SELECT al.id, al.title, al.cover_url, al.release_date,
-                   ar.id   AS artist_id,
-                   ar.name AS artist_name,
-                   1 - (al.embedding <=> :emb::vector) AS similarity
-            FROM albums al
-            JOIN artists ar ON ar.id = al.artist_id
-            WHERE al.embedding IS NOT NULL
-            ORDER BY al.embedding <=> :emb::vector
-            LIMIT 8
-        """),
-        {"emb": vec_literal},
-    ).fetchall()
+        album_rows = db.execute(
+            text("""
+                SELECT al.id, al.title, al.cover_url, al.release_date,
+                       ar.id   AS artist_id,
+                       ar.name AS artist_name,
+                       1 - (al.embedding <=> :emb::vector) AS similarity
+                FROM albums al
+                JOIN artists ar ON ar.id = al.artist_id
+                WHERE al.embedding IS NOT NULL
+                ORDER BY al.embedding <=> :emb::vector
+                LIMIT 8
+            """),
+            {"emb": vec_literal},
+        ).fetchall()
 
-    song_rows = db.execute(
-        text("""
-            SELECT s.id, s.title,
-                   ar.id    AS artist_id,
-                   ar.name  AS artist_name,
-                   al.id    AS album_id,
-                   al.title AS album_title,
-                   al.cover_url,
-                   1 - (s.embedding <=> :emb::vector) AS similarity
-            FROM songs s
-            JOIN artists ar ON ar.id = s.artist_id
-            LEFT JOIN albums al ON al.id = s.album_id
-            WHERE s.embedding IS NOT NULL
-            ORDER BY s.embedding <=> :emb::vector
-            LIMIT 8
-        """),
-        {"emb": vec_literal},
-    ).fetchall()
+        song_rows = db.execute(
+            text("""
+                SELECT s.id, s.title,
+                       ar.id    AS artist_id,
+                       ar.name  AS artist_name,
+                       al.id    AS album_id,
+                       al.title AS album_title,
+                       al.cover_url,
+                       1 - (s.embedding <=> :emb::vector) AS similarity
+                FROM songs s
+                JOIN artists ar ON ar.id = s.artist_id
+                LEFT JOIN albums al ON al.id = s.album_id
+                WHERE s.embedding IS NOT NULL
+                ORDER BY s.embedding <=> :emb::vector
+                LIMIT 8
+            """),
+            {"emb": vec_literal},
+        ).fetchall()
 
-    # Enrich any missing artist images inline
-    artist_ids = [r.id for r in artist_rows]
-    artists_db = (
-        db.query(models.Artist).filter(models.Artist.id.in_(artist_ids)).all()
-        if artist_ids else []
-    )
-    await _enrich_missing_images(db, artists_db, [])
-    artist_images = {a.id: a.image_url for a in artists_db}
+        artist_ids = [r.id for r in artist_rows]
+        artists_db = (
+            db.query(models.Artist).filter(models.Artist.id.in_(artist_ids)).all()
+            if artist_ids else []
+        )
+        await _enrich_missing_images(db, artists_db, [])
+        artist_images = {a.id: a.image_url for a in artists_db}
+    finally:
+        db.close()
 
     return {
         "artists": [

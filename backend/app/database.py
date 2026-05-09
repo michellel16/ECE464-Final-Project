@@ -27,7 +27,7 @@ if not DATABASE_URL:
 # stays within Supabase's free-tier limit of ~15 session connections.
 _using_supabase_pooler = ":6543" in DATABASE_URL
 
-_CONNECT_ARGS = {"options": "-c statement_timeout=0"}
+_CONNECT_ARGS = {"options": "-c statement_timeout=0", "connect_timeout": 5}
 
 if _using_supabase_pooler:
     engine = create_engine(DATABASE_URL, poolclass=NullPool, connect_args=_CONNECT_ARGS)
@@ -35,8 +35,10 @@ else:
     engine = create_engine(
         DATABASE_URL,
         pool_pre_ping=True,
-        pool_size=3,
-        max_overflow=7,   # hard cap: 10 total, well within Supabase's 15-connection limit
+        pool_size=5,
+        max_overflow=8,    # hard cap: 13 total, leaves 2 for Supabase admin connections
+        pool_timeout=10,   # fail fast instead of waiting 30 s for a free slot
+        pool_recycle=1800, # recycle idle connections every 30 min
         connect_args=_CONNECT_ARGS,
     )
 

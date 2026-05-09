@@ -14,6 +14,10 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+# Serialise ALL OpenAI calls process-wide: 1 in-flight at a time.
+# Free-tier keys are ~3 RPM; serialising avoids cascading 429s across users.
+_openai_sem = asyncio.Semaphore(1)
+
 # Limit concurrent background embedding tasks to 1 so they don't pile up
 # DB connections and exhaust the Supabase session-mode pool.
 _bg_embed_sem = asyncio.Semaphore(1)
@@ -105,7 +109,8 @@ async def get_embedding(text: str) -> Optional[list[float]]:
     """Call OpenAI embeddings API and return a 1536-d vector, or None on failure.
 
     Results are cached in memory so repeated searches for the same text never
-    re-hit the API — important for staying within OpenAI's free-tier rate limit.
+    re-hit the API. All calls are serialised through _openai_sem so concurrent
+    requests from multiple users can't pile up and trigger cascading 429s.
     """
     if not OPENAI_API_KEY:
         logger.warning("OPENAI_API_KEY not set — skipping embedding generation")
@@ -117,31 +122,42 @@ async def get_embedding(text: str) -> Optional[list[float]]:
     if text in _embedding_cache:
         return _embedding_cache[text]
 
-    for attempt in range(3):
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.post(
-                    "https://api.openai.com/v1/embeddings",
-                    headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
-                    json={"model": EMBEDDING_MODEL, "input": text},
-                )
-            if resp.status_code == 429:
-                if attempt == 2:
-                    logger.warning("OpenAI rate limited — giving up after 3 attempts")
-                    return None
-                wait = 2 ** attempt  # 1s, 2s
-                logger.warning("OpenAI rate limited — retrying in %ds", wait)
-                await asyncio.sleep(wait)
-                continue
-            resp.raise_for_status()
-            vec = resp.json()["data"][0]["embedding"]
-            if len(_embedding_cache) >= _CACHE_MAX:
-                _embedding_cache.pop(next(iter(_embedding_cache)))
-            _embedding_cache[text] = vec
-            return vec
-        except Exception as exc:
-            logger.error("OpenAI embedding error: %s", exc)
-            return None
+    async with _openai_sem:
+        # Re-check after acquiring the lock: a queued waiter may have fetched it.
+        if text in _embedding_cache:
+            return _embedding_cache[text]
+
+        for attempt in range(5):
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    resp = await client.post(
+                        "https://api.openai.com/v1/embeddings",
+                        headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+                        json={"model": EMBEDDING_MODEL, "input": text},
+                    )
+                if resp.status_code == 429:
+                    if attempt == 4:
+                        logger.warning("OpenAI rate limited — giving up after 5 attempts")
+                        return None
+                    # Honour the Retry-After header when present (OpenAI sends it).
+                    raw = resp.headers.get("retry-after") or resp.headers.get("x-ratelimit-reset-requests")
+                    try:
+                        wait = float(raw) if raw else 2 ** (attempt + 2)
+                    except (TypeError, ValueError):
+                        wait = 2 ** (attempt + 2)
+                    wait = min(wait, 60.0)  # cap at 60 s
+                    logger.warning("OpenAI rate limited — retrying in %.0fs", wait)
+                    await asyncio.sleep(wait)
+                    continue
+                resp.raise_for_status()
+                vec = resp.json()["data"][0]["embedding"]
+                if len(_embedding_cache) >= _CACHE_MAX:
+                    _embedding_cache.pop(next(iter(_embedding_cache)))
+                _embedding_cache[text] = vec
+                return vec
+            except Exception as exc:
+                logger.error("OpenAI embedding error: %s", exc)
+                return None
     return None
 
 
@@ -176,6 +192,8 @@ async def reembed_artist_bg(artist_id: int) -> None:
         from .database import SessionLocal
         from . import models
         from sqlalchemy.orm import joinedload
+
+        # Step 1: read — brief DB use.
         db = SessionLocal()
         try:
             artist = (
@@ -184,10 +202,30 @@ async def reembed_artist_bg(artist_id: int) -> None:
                 .filter(models.Artist.id == artist_id)
                 .first()
             )
-            if artist:
-                await embed_and_save_artist(artist, db)
+            text = artist_text(artist) if artist else None
         except Exception as exc:
-            logger.error("Background embed_artist(%d) failed: %s", artist_id, exc)
+            logger.error("Background embed_artist(%d) read failed: %s", artist_id, exc)
+            return
+        finally:
+            db.close()  # release before OpenAI call
+
+        if not text:
+            return
+
+        # Step 2: embed — no DB connection held during potential rate-limit sleeps.
+        vec = await get_embedding(text)
+        if vec is None:
+            return
+
+        # Step 3: write — brief DB use.
+        db = SessionLocal()
+        try:
+            artist = db.query(models.Artist).filter(models.Artist.id == artist_id).first()
+            if artist:
+                artist.embedding = vec
+                db.commit()
+        except Exception as exc:
+            logger.error("Background embed_artist(%d) write failed: %s", artist_id, exc)
         finally:
             db.close()
 
@@ -197,6 +235,7 @@ async def reembed_album_bg(album_id: int) -> None:
         from .database import SessionLocal
         from . import models
         from sqlalchemy.orm import joinedload
+
         db = SessionLocal()
         try:
             album = (
@@ -209,10 +248,28 @@ async def reembed_album_bg(album_id: int) -> None:
                 .filter(models.Album.id == album_id)
                 .first()
             )
-            if album:
-                await embed_and_save_album(album, db)
+            text = album_text(album) if album else None
         except Exception as exc:
-            logger.error("Background embed_album(%d) failed: %s", album_id, exc)
+            logger.error("Background embed_album(%d) read failed: %s", album_id, exc)
+            return
+        finally:
+            db.close()
+
+        if not text:
+            return
+
+        vec = await get_embedding(text)
+        if vec is None:
+            return
+
+        db = SessionLocal()
+        try:
+            album = db.query(models.Album).filter(models.Album.id == album_id).first()
+            if album:
+                album.embedding = vec
+                db.commit()
+        except Exception as exc:
+            logger.error("Background embed_album(%d) write failed: %s", album_id, exc)
         finally:
             db.close()
 
@@ -222,6 +279,7 @@ async def reembed_song_bg(song_id: int) -> None:
         from .database import SessionLocal
         from . import models
         from sqlalchemy.orm import joinedload
+
         db = SessionLocal()
         try:
             song = (
@@ -234,9 +292,27 @@ async def reembed_song_bg(song_id: int) -> None:
                 .filter(models.Song.id == song_id)
                 .first()
             )
-            if song:
-                await embed_and_save_song(song, db)
+            text = song_text(song) if song else None
         except Exception as exc:
-            logger.error("Background embed_song(%d) failed: %s", song_id, exc)
+            logger.error("Background embed_song(%d) read failed: %s", song_id, exc)
+            return
+        finally:
+            db.close()
+
+        if not text:
+            return
+
+        vec = await get_embedding(text)
+        if vec is None:
+            return
+
+        db = SessionLocal()
+        try:
+            song = db.query(models.Song).filter(models.Song.id == song_id).first()
+            if song:
+                song.embedding = vec
+                db.commit()
+        except Exception as exc:
+            logger.error("Background embed_song(%d) write failed: %s", song_id, exc)
         finally:
             db.close()
