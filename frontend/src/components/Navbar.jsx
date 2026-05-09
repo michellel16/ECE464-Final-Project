@@ -115,7 +115,7 @@ export default function Navbar() {
   )
 
   return (
-    <nav className="fixed top-0 inset-x-0 z-50 bg-gray-950/95 backdrop-blur border-b border-gray-800">
+    <nav className="fixed top-0 inset-x-0 z-50 backdrop-blur border-b border-gray-800" style={{ backgroundColor: 'rgba(5,5,13,0.95)' }}>
       <div className="max-w-7xl mx-auto px-4 h-16 flex items-center gap-4">
         {/* Logo */}
         <Link to="/" className="flex items-center gap-2 shrink-0 mr-2">

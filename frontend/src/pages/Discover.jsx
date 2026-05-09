@@ -62,7 +62,7 @@ export default function Discover() {
   const [albumSort, setAlbumSort]   = useState(
     initialTab === 'albums' && initialSort ? initialSort : 'top_rated'
   )
-  const [artistSort, setArtistSort] = useState('trending')
+  const [artistSort, setArtistSort] = useState('top_rated')
   const [songSort, setSongSort]     = useState(
     initialTab === 'songs' && initialSort ? initialSort : 'top_rated'
   )

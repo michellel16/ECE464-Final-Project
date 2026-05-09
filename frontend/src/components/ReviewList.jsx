@@ -4,10 +4,11 @@ import ReviewCard from './ReviewCard'
 const REVIEWS_PER_PAGE = 8
 
 const SORT_OPTIONS = [
-  { value: 'all',       label: 'All' },
-  { value: 'highest',   label: 'Highest' },
-  { value: 'lowest',    label: 'Lowest' },
-  { value: 'relevance', label: 'Relevance' },
+  { value: 'all',        label: 'All'        },
+  { value: 'highest',    label: 'Highest'    },
+  { value: 'lowest',     label: 'Lowest'     },
+  { value: 'most_liked', label: 'Most Liked' },
+  { value: 'relevance',  label: 'Relevance'  },
 ]
 
 export default function ReviewList({ reviews }) {
@@ -28,6 +29,9 @@ export default function ReviewList({ reviews }) {
         break
       case 'lowest':
         list = list.sort((a, b) => a.rating - b.rating)
+        break
+      case 'most_liked':
+        list = list.sort((a, b) => (b.like_count ?? 0) - (a.like_count ?? 0))
         break
       case 'relevance':
         // Written reviews first, then by newest

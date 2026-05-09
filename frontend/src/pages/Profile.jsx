@@ -730,11 +730,19 @@ function ImportAsListButton({ playlistId }) {
 
 const PLAYLIST_PAGE_SIZE = 20
 
+const PLAYLIST_SORTS = [
+  { value: 'default', label: 'Newest'  },
+  { value: 'oldest',  label: 'Oldest'  },
+  { value: 'az',      label: 'A–Z'     },
+  { value: 'za',      label: 'Z–A'     },
+]
+
 function SpotifyPlaylistsTab() {
   const [playlists, setPlaylists]     = useState([])
   const [loading, setLoading]         = useState(true)
   const [error, setError]             = useState(null)
   const [search, setSearch]           = useState('')
+  const [sort, setSort]               = useState('default')
   const [page, setPage]               = useState(1)
   const [expanded, setExpanded]       = useState(null)
   const [loadingId, setLoadingId]     = useState(null)
@@ -825,30 +833,49 @@ function SpotifyPlaylistsTab() {
     <div className="card p-8 text-center text-gray-500">No playlists found.</div>
   )
 
-  const visible = search.trim()
-    ? playlists.filter(p => p.name.toLowerCase().includes(search.toLowerCase()))
-    : playlists
+  const visible = (() => {
+    let list = search.trim()
+      ? playlists.filter(p => p.name.toLowerCase().includes(search.toLowerCase()))
+      : [...playlists]
+    if (sort === 'oldest') list.reverse()
+    else if (sort === 'az') list.sort((a, b) => a.name.localeCompare(b.name))
+    else if (sort === 'za') list.sort((a, b) => b.name.localeCompare(a.name))
+    return list
+  })()
   const totalPlaylistPages = Math.ceil(visible.length / PLAYLIST_PAGE_SIZE)
   const pagedPlaylists = visible.slice((page - 1) * PLAYLIST_PAGE_SIZE, page * PLAYLIST_PAGE_SIZE)
 
   return (
     <div>
-      <div className="relative mb-4">
-        <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
-        </svg>
-        <input
-          type="text"
-          placeholder="Search playlists…"
-          value={search}
-          onChange={e => { setSearch(e.target.value); setPage(1) }}
-          className="input w-full pl-9 py-2 text-sm"
-        />
-        {search && (
-          <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white transition-colors">
-            ✕
-          </button>
-        )}
+      <div className="flex flex-wrap gap-2 mb-4">
+        <div className="relative flex-1 min-w-0">
+          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+          </svg>
+          <input
+            type="text"
+            placeholder="Search playlists…"
+            value={search}
+            onChange={e => { setSearch(e.target.value); setPage(1); setExpanded(null) }}
+            className="input w-full pl-9 py-2 text-sm"
+          />
+          {search && (
+            <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white transition-colors">
+              ✕
+            </button>
+          )}
+        </div>
+        <div className="flex gap-1 bg-gray-900 rounded-xl p-1 shrink-0">
+          {PLAYLIST_SORTS.map(s => (
+            <button
+              key={s.value}
+              onClick={() => { setSort(s.value); setPage(1); setExpanded(null) }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${sort === s.value ? 'bg-violet-600 text-white' : 'text-gray-400 hover:text-white'}`}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {visible.length === 0 ? (
@@ -857,10 +884,10 @@ function SpotifyPlaylistsTab() {
       <div className="space-y-2">
       {pagedPlaylists.map(playlist => (
         <div key={playlist.id} className="card overflow-hidden">
-          {/* Playlist header */}
-          <button
+          {/* Playlist header — whole row toggles, import button stops propagation */}
+          <div
             onClick={() => togglePlaylist(playlist)}
-            className="w-full flex items-center gap-4 p-4 hover:bg-gray-800/50 transition-colors text-left"
+            className="flex items-center gap-4 p-4 hover:bg-gray-800/50 transition-colors cursor-pointer select-none"
           >
             {playlist.image_url ? (
               <img src={playlist.image_url} alt="" className="w-12 h-12 rounded shrink-0 object-cover" />
@@ -870,9 +897,13 @@ function SpotifyPlaylistsTab() {
             <div className="flex-1 min-w-0">
               <p className="text-white font-medium truncate">{playlist.name}</p>
             </div>
-            <ImportAsListButton playlistId={playlist.id} />
-            <span className="text-gray-500 text-sm ml-2 shrink-0">{expanded === playlist.id ? '▲' : '▼'}</span>
-          </button>
+            <div onClick={e => e.stopPropagation()}>
+              <ImportAsListButton playlistId={playlist.id} />
+            </div>
+            <span className="text-gray-500 text-sm shrink-0 ml-1">
+              {expanded === playlist.id ? '▲' : '▼'}
+            </span>
+          </div>
 
           {/* Track list */}
           {expanded === playlist.id && (
