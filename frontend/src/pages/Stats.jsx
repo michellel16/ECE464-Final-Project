@@ -177,38 +177,7 @@ export default function Stats() {
 
       {/* Recent reviews */}
       {stats.recent_reviews.length > 0 && (
-        <div className="space-y-3">
-          <h2 className="font-bold text-white text-lg">Recent Reviews</h2>
-          <div className="space-y-3">
-            {stats.recent_reviews.map(r => (
-              <div key={r.id} className="card p-4 flex items-start gap-4">
-                {r.target_cover && (
-                  <Link to={`/${r.target_type}s/${r.target_id}`}>
-                    <img src={r.target_cover} alt="" className="w-12 h-12 rounded object-cover shrink-0" loading="lazy" />
-                  </Link>
-                )}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between gap-2">
-                    <div>
-                      <Link
-                        to={`/${r.target_type}s/${r.target_id}`}
-                        className="text-white font-medium hover:text-violet-400 transition-colors"
-                      >
-                        {r.target_title}
-                      </Link>
-                      {r.target_artist && (
-                        <p className="text-gray-500 text-xs">{r.target_artist}</p>
-                      )}
-                    </div>
-                    <StarRating value={r.rating} readonly size="sm" />
-                  </div>
-                  {r.text && <p className="text-gray-400 text-sm mt-1">{r.text}</p>}
-                  <p className="text-gray-600 text-xs mt-1">{new Date(r.created_at).toLocaleDateString()}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+        <RecentReviews reviews={stats.recent_reviews} />
       )}
 
       {stats.total_reviews === 0 && (
@@ -282,6 +251,68 @@ export default function Stats() {
           ) : null}
         </div>
       </div>
+    </div>
+  )
+}
+
+const REVIEWS_PAGE_SIZE = 10
+
+function RecentReviews({ reviews }) {
+  const [page, setPage] = useState(1)
+  const totalPages = Math.ceil(reviews.length / REVIEWS_PAGE_SIZE)
+  const paged = reviews.slice((page - 1) * REVIEWS_PAGE_SIZE, page * REVIEWS_PAGE_SIZE)
+
+  return (
+    <div className="space-y-3">
+      <h2 className="font-bold text-white text-lg">Recent Reviews</h2>
+      <div className="space-y-3">
+        {paged.map(r => (
+          <div key={r.id} className="card p-4 flex items-start gap-4">
+            {r.target_cover && (
+              <Link to={`/${r.target_type}s/${r.target_id}`}>
+                <img src={r.target_cover} alt="" className="w-12 h-12 rounded object-cover shrink-0" loading="lazy" />
+              </Link>
+            )}
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <Link
+                    to={`/${r.target_type}s/${r.target_id}`}
+                    className="text-white font-medium hover:text-violet-400 transition-colors"
+                  >
+                    {r.target_title}
+                  </Link>
+                  {r.target_artist && (
+                    <p className="text-gray-500 text-xs">{r.target_artist}</p>
+                  )}
+                </div>
+                <StarRating value={r.rating} readonly size="sm" />
+              </div>
+              {r.text && <p className="text-gray-400 text-sm mt-1">{r.text}</p>}
+              <p className="text-gray-600 text-xs mt-1">{new Date(r.created_at).toLocaleDateString()}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+      {totalPages > 1 && (
+        <div className="flex items-center justify-center gap-3 pt-2">
+          <button
+            onClick={() => setPage(p => p - 1)}
+            disabled={page === 1}
+            className="px-3 py-1.5 rounded-lg text-sm text-gray-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+          >
+            ← Prev
+          </button>
+          <span className="text-sm text-gray-500">{page} / {totalPages}</span>
+          <button
+            onClick={() => setPage(p => p + 1)}
+            disabled={page === totalPages}
+            className="px-3 py-1.5 rounded-lg text-sm text-gray-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+          >
+            Next →
+          </button>
+        </div>
+      )}
     </div>
   )
 }

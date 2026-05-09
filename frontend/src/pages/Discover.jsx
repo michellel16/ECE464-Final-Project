@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useSearchParams, Link } from 'react-router-dom'
 import axios from 'axios'
 import AlbumCard from '../components/AlbumCard'
@@ -12,10 +12,11 @@ const LIST_TYPE_LABELS = {
 }
 
 const ALBUM_SORTS  = [
-  { key: 'top_rated',    label: 'Top Rated' },
-  { key: 'trending',     label: 'Trending'  },
-  { key: 'new_releases', label: 'Newest'    },
-  { key: 'alpha',        label: 'A–Z'       },
+  { key: 'top_rated',         label: 'Top Rated'        },
+  { key: 'trending',          label: 'Trending'         },
+  { key: 'recently_reviewed', label: 'Recently Reviewed'},
+  { key: 'new_releases',      label: 'Newest'           },
+  { key: 'alpha',             label: 'A–Z'              },
 ]
 const ARTIST_SORTS = [
   { key: 'top_rated', label: 'Top Rated' },
@@ -54,15 +55,25 @@ export default function Discover() {
   const [searchParams] = useSearchParams()
   const { user } = useAuth()
 
-  const [tab, setTab]               = useState(searchParams.get('tab') ?? 'albums')
-  const [albumSort, setAlbumSort]   = useState('top_rated')
+  const initialTab  = searchParams.get('tab')  ?? 'albums'
+  const initialSort = searchParams.get('sort') ?? null
+
+  const [tab, setTab]               = useState(initialTab)
+  const [albumSort, setAlbumSort]   = useState(
+    initialTab === 'albums' && initialSort ? initialSort : 'top_rated'
+  )
   const [artistSort, setArtistSort] = useState('trending')
-  const [songSort, setSongSort]     = useState('top_rated')
+  const [songSort, setSongSort]     = useState(
+    initialTab === 'songs' && initialSort ? initialSort : 'top_rated'
+  )
   const [listSort, setListSort]     = useState('top')
 
-  const [genreId, setGenreId] = useState('')
-  const [year, setYear]       = useState('')
-  const [decade, setDecade]   = useState('')
+  const [genreId, setGenreId]         = useState('')
+  const [year, setYear]               = useState('')
+  const [decade, setDecade]           = useState('')
+  const [albumSearch, setAlbumSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+  const searchTimer = useRef(null)
 
   const [genres, setGenres] = useState([])
   const [years, setYears]   = useState([])
@@ -87,6 +98,16 @@ export default function Discover() {
   const [copied, setCopied]       = useState(null)
   const [loading, setLoading]     = useState(false)
 
+  // Debounce album search input
+  useEffect(() => {
+    clearTimeout(searchTimer.current)
+    searchTimer.current = setTimeout(() => {
+      setDebouncedSearch(albumSearch)
+      setAlbumPage(1)
+    }, 350)
+    return () => clearTimeout(searchTimer.current)
+  }, [albumSearch])
+
   // Load filter option data once
   useEffect(() => {
     Promise.all([axios.get('/api/charts/genres'), axios.get('/api/charts/years')])
@@ -106,6 +127,7 @@ export default function Discover() {
       if (genreId) params.set('genre_id', genreId)
       if (year) params.set('year', year)
       else if (decade) params.set('decade', decade)
+      if (debouncedSearch) params.set('search', debouncedSearch)
       axios.get(`/api/music/albums?${params}`)
         .then(r => { setAlbums(r.data.items); setAlbumTotal(r.data.total) })
         .finally(() => setLoading(false))
@@ -126,7 +148,7 @@ export default function Discover() {
         .then(r => { setSongs(r.data.items); setSongTotal(r.data.total) })
         .finally(() => setLoading(false))
     }
-  }, [tab, albumSort, artistSort, songSort, genreId, year, decade, albumPage, artistPage, songPage])
+  }, [tab, albumSort, artistSort, songSort, genreId, year, decade, albumPage, artistPage, songPage, debouncedSearch])
 
   // Fetch lists separately
   useEffect(() => {
@@ -148,6 +170,7 @@ export default function Discover() {
     setTab(t)
     setYear('')
     setDecade('')
+    setAlbumSearch('')
     setAlbumPage(1); setArtistPage(1); setSongPage(1); setListPage(1)
   }
 
@@ -159,7 +182,7 @@ export default function Discover() {
   }
 
   function clearFilters() {
-    setGenreId(''); setYear(''); setDecade('')
+    setGenreId(''); setYear(''); setDecade(''); setAlbumSearch('')
     setAlbumPage(1); setArtistPage(1); setSongPage(1)
   }
 
@@ -183,7 +206,7 @@ export default function Discover() {
 
   const sortOptions  = tab === 'albums' ? ALBUM_SORTS : tab === 'artists' ? ARTIST_SORTS : tab === 'songs' ? SONG_SORTS : LIST_SORTS
   const currentSort  = tab === 'albums' ? albumSort : tab === 'artists' ? artistSort : tab === 'songs' ? songSort : listSort
-  const hasFilter    = genreId || year || decade
+  const hasFilter    = genreId || year || decade || albumSearch
   const showYearDecade = tab === 'albums'
 
   const currentPage  = tab === 'albums' ? albumPage : tab === 'artists' ? artistPage : tab === 'songs' ? songPage : listPage
@@ -224,6 +247,23 @@ export default function Discover() {
       {/* Filters row */}
       {tab !== 'lists' && (
         <div className="flex flex-wrap items-center gap-3">
+          {tab === 'albums' && (
+            <div className="relative">
+              <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+              </svg>
+              <input
+                type="text"
+                value={albumSearch}
+                onChange={e => setAlbumSearch(e.target.value)}
+                placeholder="Search albums…"
+                className="input text-sm py-1.5 pl-8 pr-7 w-44"
+              />
+              {albumSearch && (
+                <button onClick={() => setAlbumSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 transition-colors text-xs">✕</button>
+              )}
+            </div>
+          )}
           <select value={genreId} onChange={e => { setGenreId(e.target.value); setAlbumPage(1); setArtistPage(1); setSongPage(1) }}
             className="input text-sm py-1.5 px-3 min-w-[130px]">
             <option value="">All genres</option>

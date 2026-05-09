@@ -8,6 +8,7 @@ genres, audio features, and user review text.
 import asyncio
 import logging
 import os
+import time
 from typing import Optional
 
 import httpx
@@ -26,10 +27,22 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 EMBEDDING_MODEL = "text-embedding-3-small"
 EMBEDDING_DIM = 1536
 
-# Simple in-memory cache: identical text → identical vector, no need to re-call OpenAI.
+# Positive cache: identical text → identical vector (no need to re-call OpenAI).
 # Capped at 2000 entries; oldest entry is evicted when full.
 _CACHE_MAX = 2000
 _embedding_cache: dict[str, list[float]] = {}
+
+# Negative cache: texts that recently failed get a cooldown so they are not
+# retried on every request.  After _FAILURE_COOLDOWN_SECS the entry expires
+# and the next caller may try again (rate limit may have reset by then).
+_FAILURE_COOLDOWN_SECS = 600  # 10 minutes
+_embedding_failure_times: dict[str, float] = {}  # text → monotonic timestamp of last failure
+
+
+def is_embedding_cooling_down(text: str) -> bool:
+    """Return True if this text failed recently and should not be retried yet."""
+    t = _embedding_failure_times.get(text)
+    return t is not None and (time.monotonic() - t) < _FAILURE_COOLDOWN_SECS
 
 
 # ── Text builders ─────────────────────────────────────────────────────────────
@@ -122,10 +135,17 @@ async def get_embedding(text: str) -> Optional[list[float]]:
     if text in _embedding_cache:
         return _embedding_cache[text]
 
+    # Fast-fail: this text failed recently — don't hammer the API again.
+    if is_embedding_cooling_down(text):
+        logger.debug("Embedding cooling down — skipping OpenAI call")
+        return None
+
     async with _openai_sem:
-        # Re-check after acquiring the lock: a queued waiter may have fetched it.
+        # Re-check after acquiring the lock: a queued waiter may have fetched/failed it.
         if text in _embedding_cache:
             return _embedding_cache[text]
+        if is_embedding_cooling_down(text):
+            return None
 
         for attempt in range(5):
             try:
@@ -137,7 +157,8 @@ async def get_embedding(text: str) -> Optional[list[float]]:
                     )
                 if resp.status_code == 429:
                     if attempt == 4:
-                        logger.warning("OpenAI rate limited — giving up after 5 attempts")
+                        logger.warning("OpenAI rate limited — giving up; cooling down for %ds", _FAILURE_COOLDOWN_SECS)
+                        _embedding_failure_times[text] = time.monotonic()
                         return None
                     # Honour the Retry-After header when present (OpenAI sends it).
                     raw = resp.headers.get("retry-after") or resp.headers.get("x-ratelimit-reset-requests")
@@ -154,9 +175,11 @@ async def get_embedding(text: str) -> Optional[list[float]]:
                 if len(_embedding_cache) >= _CACHE_MAX:
                     _embedding_cache.pop(next(iter(_embedding_cache)))
                 _embedding_cache[text] = vec
+                _embedding_failure_times.pop(text, None)  # clear any prior failure
                 return vec
             except Exception as exc:
                 logger.error("OpenAI embedding error: %s", exc)
+                _embedding_failure_times[text] = time.monotonic()
                 return None
     return None
 

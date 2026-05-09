@@ -9,8 +9,8 @@ from ..auth import get_current_user
 router = APIRouter(prefix="/api/notifications", tags=["notifications"])
 
 
-def _notif_out(n: models.Notification) -> dict:
-    return {
+def _notif_out(n: models.Notification, db=None) -> dict:
+    out = {
         "id": f"n_{n.id}",
         "type": n.type,
         "from_user": {
@@ -23,6 +23,14 @@ def _notif_out(n: models.Notification) -> dict:
         "is_read":     n.is_read,
         "created_at":  n.created_at,
     }
+    if n.type == "review_like" and n.entity_id and db:
+        review = db.query(models.Review).filter_by(id=n.entity_id).first()
+        if review:
+            if review.album_id:
+                out["review_target"] = {"type": "album", "id": review.album_id}
+            elif review.song_id:
+                out["review_target"] = {"type": "song", "id": review.song_id}
+    return out
 
 
 def _rec_out(r: models.UserRecommendation) -> dict:
@@ -94,7 +102,7 @@ def get_notifications(
         .all()
     )
 
-    combined = [_notif_out(n) for n in notifs] + [_rec_out(r) for r in recs]
+    combined = [_notif_out(n, db) for n in notifs] + [_rec_out(r) for r in recs]
     combined.sort(key=lambda x: x["created_at"], reverse=True)
     return combined[:limit]
 

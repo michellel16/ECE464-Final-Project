@@ -12,8 +12,10 @@ import SongPage   from './pages/SongPage'
 import Profile    from './pages/Profile'
 import Lists      from './pages/Lists'
 import ListDetail from './pages/ListDetail'
-import Stats      from './pages/Stats'
-import Charts     from './pages/Charts'
+import Stats          from './pages/Stats'
+import Charts         from './pages/Charts'
+import ForgotPassword from './pages/ForgotPassword'
+import ResetPassword  from './pages/ResetPassword'
 
 function Protected({ children }) {
   const { user, loading } = useAuth()
@@ -39,8 +41,10 @@ function AppRoutes() {
       <main className="pt-16">
         <Routes>
           <Route path="/"                element={<Home />} />
-          <Route path="/login"           element={<Login />} />
-          <Route path="/register"        element={<Register />} />
+          <Route path="/login"            element={<Login />} />
+          <Route path="/register"         element={<Register />} />
+          <Route path="/forgot-password"  element={<ForgotPassword />} />
+          <Route path="/reset-password"   element={<ResetPassword />} />
           <Route path="/discover"        element={<Discover />} />
           <Route path="/search"          element={<Search />} />
           <Route path="/artists/:id"     element={<ArtistPage />} />

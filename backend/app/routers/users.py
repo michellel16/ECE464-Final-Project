@@ -1,20 +1,38 @@
 import json
 import uuid
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from fastapi import APIRouter, Body, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
 
+from typing import Optional
+
 from .. import models, schemas
 from ..database import get_db
-from ..auth import get_current_user
+from ..auth import get_current_user, get_current_user_optional
 
-AVATARS_DIR = Path(__file__).parent.parent / "static" / "avatars"
-ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+AVATARS_DIR  = Path(__file__).parent.parent / "static" / "avatars"
+BANNERS_DIR  = Path(__file__).parent.parent / "static" / "banners"
+BANNERS_DIR.mkdir(parents=True, exist_ok=True)
+ALLOWED_TYPES  = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 MAX_SIZE_BYTES = 5 * 1024 * 1024  # 5 MB
 
 router = APIRouter(prefix="/api/users", tags=["users"])
+
+
+def _can_view(viewer: Optional[models.User], profile_user: models.User, db) -> bool:
+    """Return True if viewer is allowed to see a private user's content."""
+    if not profile_user.is_private:
+        return True
+    if viewer is None:
+        return False
+    if viewer.id == profile_user.id:
+        return True
+    return db.query(models.UserFollow).filter_by(
+        follower_id=viewer.id, followed_id=profile_user.id
+    ).first() is not None
 
 
 def _user_out(user: models.User, db=None) -> dict:
@@ -39,6 +57,7 @@ def _user_out(user: models.User, db=None) -> dict:
         "following_count": following_count,
         "is_private": user.is_private or False,
         "music_preferences": prefs,
+        "banner_url": user.banner_url,
     }
 
 
@@ -119,9 +138,9 @@ def update_profile(
         new_username = update.username.strip()
         if not new_username:
             raise HTTPException(status_code=400, detail="Username cannot be empty")
-        if new_username != current_user.username:
+        if new_username.lower() != current_user.username.lower():
             taken = db.query(models.User).filter(
-                models.User.username == new_username,
+                func.lower(models.User.username) == new_username.lower(),
                 models.User.id != current_user.id,
             ).first()
             if taken:
@@ -131,6 +150,8 @@ def update_profile(
         current_user.bio = update.bio
     if update.avatar_url is not None:
         current_user.avatar_url = update.avatar_url
+    if update.banner_url is not None:
+        current_user.banner_url = update.banner_url
     if update.is_private is not None:
         current_user.is_private = update.is_private
     db.commit()
@@ -166,6 +187,47 @@ async def upload_avatar(
     current_user.avatar_url = f"/static/avatars/{filename}"
     db.commit()
     return {"avatar_url": current_user.avatar_url}
+
+
+@router.post("/me/banner")
+async def upload_banner(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    if file.content_type not in ALLOWED_TYPES:
+        raise HTTPException(status_code=400, detail="Only JPEG, PNG, WebP, or GIF images are allowed")
+    data = await file.read()
+    if len(data) > MAX_SIZE_BYTES:
+        raise HTTPException(status_code=400, detail="File too large (max 5 MB)")
+
+    if current_user.banner_url and current_user.banner_url.startswith("/static/banners/"):
+        old_path = Path(__file__).parent.parent / current_user.banner_url.lstrip("/")
+        if old_path.exists():
+            old_path.unlink()
+
+    ext = file.content_type.split("/")[-1].replace("jpeg", "jpg")
+    filename = f"{current_user.id}_{uuid.uuid4().hex[:8]}.{ext}"
+    dest = BANNERS_DIR / filename
+    dest.write_bytes(data)
+
+    current_user.banner_url = f"/static/banners/{filename}"
+    db.commit()
+    return {"banner_url": current_user.banner_url}
+
+
+@router.delete("/me/banner")
+def remove_banner(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    if current_user.banner_url and current_user.banner_url.startswith("/static/banners/"):
+        old_path = Path(__file__).parent.parent / current_user.banner_url.lstrip("/")
+        if old_path.exists():
+            old_path.unlink()
+    current_user.banner_url = None
+    db.commit()
+    return {"banner_url": None}
 
 
 @router.get("/me/preferences")
@@ -351,45 +413,72 @@ def reject_follow_request(
 
 
 @router.get("/{username}/followers")
-def get_followers(username: str, db: Session = Depends(get_db)):
+def get_followers(
+    username: str,
+    db: Session = Depends(get_db),
+    current_user: Optional[models.User] = Depends(get_current_user_optional),
+):
     user = db.query(models.User).filter(models.User.username == username).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    if not _can_view(current_user, user, db):
+        raise HTTPException(status_code=403, detail="This account is private")
     return [_user_out(f.follower, db) for f in user.followers]
 
 
 @router.get("/{username}/following")
-def get_following(username: str, db: Session = Depends(get_db)):
+def get_following(
+    username: str,
+    db: Session = Depends(get_db),
+    current_user: Optional[models.User] = Depends(get_current_user_optional),
+):
     user = db.query(models.User).filter(models.User.username == username).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    if not _can_view(current_user, user, db):
+        raise HTTPException(status_code=403, detail="This account is private")
     return [_user_out(f.followed, db) for f in user.following]
 
 
 @router.get("/{username}/activity")
 def get_user_activity(
-    username: str, skip: int = 0, limit: int = 20, db: Session = Depends(get_db)
+    username: str,
+    skip: int = 0,
+    limit: int = 20,
+    days: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: Optional[models.User] = Depends(get_current_user_optional),
 ):
     user = db.query(models.User).filter(models.User.username == username).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    rows = (
+    if not _can_view(current_user, user, db):
+        raise HTTPException(status_code=403, detail="This account is private")
+    q = (
         db.query(models.Activity)
         .options(joinedload(models.Activity.user))
         .filter(models.Activity.user_id == user.id)
-        .order_by(models.Activity.created_at.desc())
-        .offset(skip).limit(limit).all()
     )
+    if days is not None:
+        cutoff = datetime.utcnow() - timedelta(days=days)
+        q = q.filter(models.Activity.created_at >= cutoff)
+    rows = q.order_by(models.Activity.created_at.desc()).offset(skip).limit(limit).all()
     return _enrich_activities(rows, db)
 
 
 @router.get("/{username}/reviews")
 def get_user_reviews(
-    username: str, skip: int = 0, limit: int = 20, db: Session = Depends(get_db)
+    username: str,
+    skip: int = 0,
+    limit: int = 20,
+    db: Session = Depends(get_db),
+    current_user: Optional[models.User] = Depends(get_current_user_optional),
 ):
     user = db.query(models.User).filter(models.User.username == username).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    if not _can_view(current_user, user, db):
+        raise HTTPException(status_code=403, detail="This account is private")
     reviews = (
         db.query(models.Review)
         .options(

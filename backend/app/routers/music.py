@@ -660,6 +660,7 @@ def list_albums(
     year: Optional[int] = None,
     decade: Optional[int] = None,
     include_total: bool = False,
+    search: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
     opts = [
@@ -668,6 +669,8 @@ def list_albums(
     ]
 
     def _gf(q):
+        if search:
+            q = q.filter(models.Album.title.ilike(f"%{search}%"))
         if genre_id:
             album_ids_in_genre = (
                 db.query(models.album_genre.c.album_id)

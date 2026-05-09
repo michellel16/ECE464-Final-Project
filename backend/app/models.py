@@ -106,6 +106,7 @@ class User(Base):
     hashed_password = Column(String, nullable=True)
     bio             = Column(Text,   nullable=True)
     avatar_url      = Column(String, nullable=True)
+    banner_url      = Column(String, nullable=True)
     created_at      = Column(DateTime, default=datetime.utcnow)
     is_active       = Column(Boolean, default=True)
     is_private      = Column(Boolean, default=False)

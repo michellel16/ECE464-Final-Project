@@ -1,5 +1,7 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import ReviewCard from './ReviewCard'
+
+const REVIEWS_PER_PAGE = 8
 
 const SORT_OPTIONS = [
   { value: 'all',       label: 'All' },
@@ -12,6 +14,7 @@ export default function ReviewList({ reviews }) {
   const [sort, setSort]         = useState('all')
   const [onlyText, setOnlyText] = useState(false)
   const [query, setQuery]       = useState('')
+  const [page, setPage]         = useState(1)
 
   const filtered = useMemo(() => {
     let list = onlyText ? reviews.filter(r => r.text?.trim()) : [...reviews]
@@ -40,6 +43,12 @@ export default function ReviewList({ reviews }) {
     }
     return list
   }, [reviews, sort, onlyText, query])
+
+  // Reset to page 1 whenever filters change
+  useEffect(() => { setPage(1) }, [sort, onlyText, query])
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / REVIEWS_PER_PAGE))
+  const paged = filtered.slice((page - 1) * REVIEWS_PER_PAGE, page * REVIEWS_PER_PAGE)
 
   if (reviews.length === 0) return (
     <div className="card p-8 text-center text-gray-500">No reviews yet. Be the first!</div>
@@ -115,9 +124,33 @@ export default function ReviewList({ reviews }) {
           No reviews match these filters.
         </div>
       ) : (
-        <div className="space-y-3">
-          {filtered.map(r => <ReviewCard key={r.id} review={r} />)}
-        </div>
+        <>
+          <div className="space-y-3">
+            {paged.map(r => <ReviewCard key={r.id} review={r} />)}
+          </div>
+
+          {totalPages > 1 && (
+            <div className="flex items-center justify-center gap-2 pt-2">
+              <button
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+                disabled={page === 1}
+                className="px-3 py-1.5 rounded-lg text-sm bg-gray-800 text-gray-300 hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              >
+                ← Prev
+              </button>
+              <span className="text-sm text-gray-500">
+                Page {page} of {totalPages}
+              </span>
+              <button
+                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                disabled={page === totalPages}
+                className="px-3 py-1.5 rounded-lg text-sm bg-gray-800 text-gray-300 hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              >
+                Next →
+              </button>
+            </div>
+          )}
+        </>
       )}
     </div>
   )

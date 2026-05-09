@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from .seed import seed_database
+from .seed import seed_database, seed_extra_data, seed_activity_boost
 from .routers import auth, users, music, lists, social, search, stats, spotify, recommendations, charts, notifications
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -105,6 +105,16 @@ async def _startup_tasks():
         seed_database()
     except Exception as e:
         print(f"Seed skipped: {e}")
+
+    try:
+        seed_extra_data()
+    except Exception as e:
+        print(f"Extra seed skipped: {e}")
+
+    try:
+        seed_activity_boost()
+    except Exception as e:
+        print(f"Activity boost skipped: {e}")
 
     try:
         from .routers.charts import _do_propagate_genres, _do_cleanup_genres

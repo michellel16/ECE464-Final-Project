@@ -35,8 +35,10 @@ async def sync_user(
     # First time — create profile
     if not body.username:
         raise HTTPException(status_code=400, detail="Username required for new account")
-    if db.query(models.User).filter(models.User.username == body.username).first():
+    if db.query(models.User).filter(func.lower(models.User.username) == body.username.lower()).first():
         raise HTTPException(status_code=400, detail="Username already taken")
+    if db.query(models.User).filter(func.lower(models.User.email) == email.lower()).first():
+        raise HTTPException(status_code=400, detail="An account with this email already exists")
 
     user = models.User(
         username=body.username,

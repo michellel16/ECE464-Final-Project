@@ -278,6 +278,8 @@ export default function Navbar() {
 }
 
 function NotifRow({ n, onClose }) {
+  const { user } = useAuth()
+
   const ICONS = {
     new_follower:   '👤',
     follow_request: '🔔',
@@ -298,11 +300,18 @@ function NotifRow({ n, onClose }) {
   }
 
   function href() {
-    if (n.type === 'recommendation') {
-      const item = n.song ?? n.album
-      if (item) return `/${n.song ? 'songs' : 'albums'}/${item.id}`
+    if (n.type === 'new_follower' || n.type === 'follow_request') {
+      return n.from_user?.username ? `/users/${n.from_user.username}` : null
     }
-    if (n.from_user?.username) return `/users/${n.from_user.username}`
+    if (n.type === 'review_like') {
+      if (n.review_target) {
+        return `/${n.review_target.type === 'album' ? 'albums' : 'songs'}/${n.review_target.id}`
+      }
+      return null
+    }
+    if (n.type === 'recommendation') {
+      return user?.username ? `/users/${user.username}?tab=recs` : null
+    }
     return null
   }
 

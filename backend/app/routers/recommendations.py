@@ -37,15 +37,23 @@ _MIN_PROFILE_SIZE = 2
 # In-process cache: embedding text → vector (stable across requests, cleared on restart)
 _pref_embedding_cache: dict[str, list[float]] = {}
 
+# In-flight guards: prevent queuing duplicate background tasks for the same key.
+_pref_bg_inflight: set[str] = set()
+_taste_bg_inflight: set[int] = set()
+
 
 async def _fetch_pref_embeddings_bg(texts: list[str]) -> None:
-    """Background: fetch missing preference embeddings one at a time to avoid bursting the rate limit."""
-    from ..embeddings import get_embedding
-    for t in texts:
-        if t not in _pref_embedding_cache:
-            vec = await get_embedding(t)
-            if vec is not None:
-                _pref_embedding_cache[t] = vec
+    """Background: fetch missing preference embeddings one at a time."""
+    from ..embeddings import get_embedding, is_embedding_cooling_down
+    _pref_bg_inflight.update(texts)
+    try:
+        for t in texts:
+            if t not in _pref_embedding_cache and not is_embedding_cooling_down(t):
+                vec = await get_embedding(t)
+                if vec is not None:
+                    _pref_embedding_cache[t] = vec
+    finally:
+        _pref_bg_inflight.difference_update(texts)
 
 
 # ── Taste-profile helpers ──────────────────────────────────────────────────────
@@ -137,21 +145,25 @@ async def _refresh_taste_embedding_bg(user_id: int, taste_text: str, fingerprint
     """Background task: call OpenAI and persist the result — never blocks the request."""
     from ..embeddings import get_embedding
 
-    vec = await get_embedding(taste_text)
-    if vec is None:
-        return
-
-    db = SessionLocal()
+    _taste_bg_inflight.add(user_id)
     try:
-        user = db.query(models.User).filter_by(id=user_id).first()
-        if user:
-            user.taste_embedding = vec
-            user.taste_profile_hash = fingerprint
-            db.commit()
-    except Exception as exc:
-        logger.error("Background taste embedding update failed for user %d: %s", user_id, exc)
+        vec = await get_embedding(taste_text)
+        if vec is None:
+            return
+
+        db = SessionLocal()
+        try:
+            user = db.query(models.User).filter_by(id=user_id).first()
+            if user:
+                user.taste_embedding = vec
+                user.taste_profile_hash = fingerprint
+                db.commit()
+        except Exception as exc:
+            logger.error("Background taste embedding update failed for user %d: %s", user_id, exc)
+        finally:
+            db.close()
     finally:
-        db.close()
+        _taste_bg_inflight.discard(user_id)
 
 
 # ── Vector helpers ─────────────────────────────────────────────────────────────
@@ -418,12 +430,13 @@ async def my_recommendations(
     # ── Fetch preference cluster embeddings (cache-only in hot path) ──────────
     # Never call OpenAI here — use whatever is already cached, and queue a
     # background task to warm any missing entries for the next request.
+    from ..embeddings import is_embedding_cooling_down
     pref_vecs: list[list[float]] = []
     missing_pref_texts: list[str] = []
     for t in interest_texts:
         if t in _pref_embedding_cache:
             pref_vecs.append(_pref_embedding_cache[t])
-        else:
+        elif t not in _pref_bg_inflight and not is_embedding_cooling_down(t):
             missing_pref_texts.append(t)
     if missing_pref_texts:
         background_tasks.add_task(_fetch_pref_embeddings_bg, missing_pref_texts)
@@ -450,7 +463,7 @@ async def my_recommendations(
 
         if taste_vec is None:
             taste_text = _build_taste_text(reviews, album_statuses, song_statuses, preferences or None)
-            if taste_text != "Music taste profile:":
+            if taste_text != "Music taste profile:" and uid not in _taste_bg_inflight:
                 background_tasks.add_task(_refresh_taste_embedding_bg, uid, taste_text, fp)
 
     if taste_vec:

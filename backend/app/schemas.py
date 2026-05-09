@@ -92,6 +92,7 @@ class UserUpdate(BaseModel):
     username: Optional[str] = None
     bio: Optional[str] = None
     avatar_url: Optional[str] = None
+    banner_url: Optional[str] = None
     is_private: Optional[bool] = None
 
 

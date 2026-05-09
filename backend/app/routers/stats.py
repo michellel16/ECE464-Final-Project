@@ -62,7 +62,7 @@ def my_stats(db: Session = Depends(get_db), current_user: models.User = Depends(
         db.query(models.Review)
         .filter_by(user_id=uid)
         .order_by(models.Review.created_at.desc())
-        .limit(5).all()
+        .limit(100).all()
     )
     recent_out = []
     for r in recent:

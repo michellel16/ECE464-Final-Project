@@ -4,7 +4,9 @@ import axios from 'axios'
 import { useAuth } from '../contexts/AuthContext'
 import { Avatar } from '../components/Navbar'
 
-const TABS = ['All', 'Artists', 'Albums', 'Songs', 'Users']
+const TABS = ['All', 'Artists', 'Albums', 'Songs', 'Users', 'Lists']
+
+const LIST_TYPE_LABELS = { custom: 'Custom', listened: 'Listened', want_to_listen: 'Want to Listen', favorites: 'Favorites' }
 
 export default function Search() {
   const [params] = useSearchParams()
@@ -112,7 +114,7 @@ export default function Search() {
   )
 
   const localTotal = localResults
-    ? localResults.artists.length + localResults.albums.length + localResults.songs.length + localResults.users.length
+    ? localResults.artists.length + localResults.albums.length + localResults.songs.length + localResults.users.length + (localResults.lists?.length ?? 0)
     : 0
 
   const hasSpotify = spotifyResults && (
@@ -123,6 +125,7 @@ export default function Search() {
   const showAlbums  = tab === 'All' || tab === 'Albums'
   const showSongs   = tab === 'All' || tab === 'Songs'
   const showUsers   = tab === 'All' || tab === 'Users'
+  const showLists   = tab === 'All' || tab === 'Lists'
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-8 space-y-6">
@@ -230,22 +233,46 @@ export default function Search() {
             </Section>
           )}
 
+          {/* Lists */}
+          {showLists && localResults.lists?.length > 0 && (
+            <Section title="Lists">
+              <div className="space-y-2">
+                {localResults.lists.map(l => (
+                  <Link key={l.id} to={`/lists/${l.id}`} className="card p-3 flex items-center gap-4 hover:border-violet-700 transition-colors group">
+                    <div className="w-10 h-10 rounded bg-gray-800 flex items-center justify-center text-gray-500 shrink-0 text-lg">♪</div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-white font-medium group-hover:text-violet-400 transition-colors truncate">{l.name}</p>
+                      <p className="text-gray-500 text-sm">
+                        {l.owner_username && <span className="text-violet-400/80">{l.owner_username}</span>}
+                        <span className="text-gray-600"> · {l.item_count} item{l.item_count !== 1 ? 's' : ''}</span>
+                      </p>
+                    </div>
+                    <span className="text-[10px] text-gray-500 border border-gray-700 px-1.5 py-0.5 rounded-full shrink-0">
+                      {LIST_TYPE_LABELS[l.list_type] ?? l.list_type}
+                    </span>
+                  </Link>
+                ))}
+              </div>
+            </Section>
+          )}
+
           {/* Empty state for filtered tab */}
           {localTotal > 0 && (
             (tab === 'Artists' && localResults.artists.length === 0) ||
             (tab === 'Albums'  && localResults.albums.length === 0)  ||
             (tab === 'Songs'   && localResults.songs.length === 0)   ||
-            (tab === 'Users'   && localResults.users.length === 0)
+            (tab === 'Users'   && localResults.users.length === 0)   ||
+            (tab === 'Lists'   && (localResults.lists?.length ?? 0) === 0)
           ) && (
             <p className="text-gray-500 text-sm">No {tab.toLowerCase()} found for "{q}".</p>
           )}
 
-          {localTotal === 0 && !spotifyLoading && tab !== 'Users' && (
+          {localTotal === 0 && !spotifyLoading && tab !== 'Users' && tab !== 'Lists' && (
             <p className="text-gray-500 text-sm">No Tunelog results — see Spotify results below.</p>
           )}
 
-          {localTotal === 0 && tab === 'Users' && (
-            <p className="text-gray-500 text-sm">No users found for "{q}".</p>
+          {localTotal === 0 && (tab === 'Users' || tab === 'Lists') && (
+            <p className="text-gray-500 text-sm">No {tab.toLowerCase()} found for "{q}".</p>
           )}
         </div>
       )}
@@ -306,8 +333,8 @@ export default function Search() {
         </div>
       )}
 
-      {/* ── Spotify section (All + Artists/Albums/Songs tabs, not Users) ── */}
-      {tab !== 'Users' && (
+      {/* ── Spotify section (All + Artists/Albums/Songs tabs, not Users/Lists) ── */}
+      {tab !== 'Users' && tab !== 'Lists' && (
         <>
           {(hasSpotify || spotifyLoading || spotifyError) && (
             <div className="flex items-center gap-3">
@@ -438,7 +465,7 @@ export default function Search() {
         </>
       )}
 
-      {!spotifyLoading && spotifyResults !== null && !hasSpotify && localTotal === 0 && tab !== 'Users' && (
+      {!spotifyLoading && spotifyResults !== null && !hasSpotify && localTotal === 0 && tab !== 'Users' && tab !== 'Lists' && (
         <div className="text-center text-gray-500 py-12">No results found for "{q}"</div>
       )}
     </div>

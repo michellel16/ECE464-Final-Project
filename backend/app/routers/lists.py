@@ -338,13 +338,25 @@ def get_user_lists(
     user = db.query(models.User).filter(models.User.username == username).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    if user.is_private:
+        viewer_id = current_user.id if current_user else None
+        if viewer_id != user.id:
+            is_following = bool(viewer_id and db.query(models.UserFollow).filter_by(
+                follower_id=viewer_id, followed_id=user.id
+            ).first())
+            if not is_following:
+                raise HTTPException(status_code=403, detail="This account is private")
+    is_owner = current_user is not None and current_user.id == user.id
+    list_filter = [models.List.user_id == user.id]
+    if not is_owner:
+        list_filter.append(models.List.is_public == True)
     lists = (
         db.query(models.List)
         .options(
             joinedload(models.List.items).joinedload(models.ListItem.album),
             joinedload(models.List.items).joinedload(models.ListItem.song).joinedload(models.Song.album),
         )
-        .filter(models.List.user_id == user.id, models.List.is_public == True)
+        .filter(*list_filter)
         .all()
     )
     list_ids = [l.id for l in lists]

@@ -29,22 +29,25 @@ export default function Profile() {
 
   const isMe = me?.username === username
 
+  // Honour ?tab=requests from notification deep-links
   useEffect(() => {
-    const fetches = [
+    const t = searchParams.get('tab')
+    if (t) { setTab(t); setSearchParams({}, { replace: true }) }
+  }, [])
+
+  useEffect(() => {
+    Promise.allSettled([
       axios.get(`/api/users/${username}`),
       axios.get(`/api/users/${username}/reviews`),
       axios.get(`/api/lists/user/${username}`),
-    ]
-    if (me && !isMe) {
-      fetches.push(axios.get(`/api/users/${username}/follow-status`))
-    }
-    Promise.all(fetches).then(([pRes, rRes, lRes, fsRes]) => {
-      setProfile(pRes.data)
-      setReviews(rRes.data)
-      setLists(lRes.data)
-      if (fsRes) {
-        setFollowing(fsRes.data.following)
-        setRequested(fsRes.data.requested ?? false)
+      me && !isMe ? axios.get(`/api/users/${username}/follow-status`) : Promise.resolve(null),
+    ]).then(([pRes, rRes, lRes, fsRes]) => {
+      if (pRes.status === 'fulfilled') setProfile(pRes.value.data)
+      if (rRes.status === 'fulfilled') setReviews(rRes.value.data)
+      if (lRes.status === 'fulfilled') setLists(lRes.value.data)
+      if (fsRes.status === 'fulfilled' && fsRes.value?.data) {
+        setFollowing(fsRes.value.data.following)
+        setRequested(fsRes.value.data.requested ?? false)
       }
     }).finally(() => setLoading(false))
   }, [username, me])
@@ -127,10 +130,88 @@ export default function Profile() {
       )}
 
       {/* Profile header */}
-      <div className="card p-6 mb-6">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-5">
-          <Avatar username={profile.username} avatarUrl={profile.avatar_url} size={20} className="ring-4 ring-violet-700/40" />
-          <div className="flex-1 min-w-0">
+      <div className="card mb-6 overflow-hidden">
+        {/* Banner */}
+        <div className="relative h-36 sm:h-44 bg-gradient-to-br from-violet-950/80 via-gray-900 to-gray-900 shrink-0">
+          {profile.banner_url && (
+            <img src={profile.banner_url} alt="" className="w-full h-full object-cover" />
+          )}
+        </div>
+
+        {/* Avatar + actions row */}
+        <div className="relative z-10 px-5 sm:px-6">
+          <div className="flex items-end justify-between -mt-10 sm:-mt-12 mb-3">
+            <div className="relative z-10 ring-4 ring-gray-900 rounded-full shrink-0">
+              <Avatar username={profile.username} avatarUrl={profile.avatar_url} size={20} />
+            </div>
+            <div className="pb-1 flex gap-2 items-center shrink-0">
+              {me && !isMe && (
+                <button
+                  onClick={toggleFollow}
+                  disabled={followLoading}
+                  className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors disabled:opacity-60 ${
+                    isFollowing
+                      ? 'bg-gray-700 text-white hover:bg-red-900/60 hover:text-red-300'
+                      : isRequested
+                      ? 'bg-gray-700 text-gray-300 hover:bg-red-900/60 hover:text-red-300'
+                      : 'btn-primary'
+                  }`}
+                >
+                  {followLoading ? '…' : isFollowing ? 'Following' : isRequested ? 'Requested' : 'Follow'}
+                </button>
+              )}
+              {isMe && (
+                <>
+                  <button onClick={() => setShowEditProfile(true)} className="btn-secondary text-sm px-4 py-1.5">Edit Profile</button>
+                  <button onClick={() => setShowAccountSettings(true)} className="btn-secondary text-sm px-4 py-1.5">Account</button>
+                  {spotifyStatus !== null && (
+                    <div className="relative">
+                      {spotifyStatus.connected ? (
+                        <>
+                          <button
+                            onClick={() => setShowSpotifyMenu(m => !m)}
+                            className="flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-green-700/30 border border-green-700/50 text-green-400 text-sm font-medium transition-colors hover:bg-green-700/50"
+                          >
+                            <SpotifyIcon className="w-3.5 h-3.5" />
+                            Spotify
+                            <span className="text-xs">{showSpotifyMenu ? '▲' : '▼'}</span>
+                          </button>
+                          {showSpotifyMenu && (
+                            <div className="absolute right-0 top-full mt-1.5 z-30 bg-gray-900 border border-gray-700 rounded-xl overflow-hidden shadow-xl min-w-[148px]">
+                              <button
+                                onClick={() => { setShowImport(true); setShowSpotifyMenu(false) }}
+                                className="w-full text-left px-4 py-2.5 text-sm text-green-400 hover:bg-gray-800 transition-colors"
+                              >
+                                Import Music
+                              </button>
+                              <div className="border-t border-gray-800" />
+                              <button
+                                onClick={disconnectSpotify}
+                                className="w-full text-left px-4 py-2.5 text-sm text-gray-400 hover:bg-gray-800 hover:text-red-400 transition-colors"
+                              >
+                                Disconnect
+                              </button>
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <button
+                          onClick={connectSpotify}
+                          className="flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-green-600 hover:bg-green-500 text-white text-sm font-medium transition-colors"
+                        >
+                          <SpotifyIcon className="w-3.5 h-3.5" />
+                          Spotify
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Name + bio + stats */}
+          <div className="pb-5">
             <h1 className="text-2xl font-bold text-white flex items-center gap-2">
               {profile.username}
               {profile.is_private && (
@@ -163,137 +244,88 @@ export default function Profile() {
               <button onClick={() => setFollowModal('following')} className="hover:text-white transition-colors">
                 <strong className="text-white">{profile.following_count ?? 0}</strong> following
               </button>
-              <span><strong className="text-white">{reviews.length}</strong> reviews</span>
-            </div>
-          </div>
-          {me && !isMe && (
-            <button
-              onClick={toggleFollow}
-              disabled={followLoading}
-              className={`px-6 py-2 rounded-full text-sm font-medium transition-colors disabled:opacity-60 ${
-                isFollowing
-                  ? 'bg-gray-700 text-white hover:bg-red-900/60 hover:text-red-300'
-                  : isRequested
-                  ? 'bg-gray-700 text-gray-300 hover:bg-red-900/60 hover:text-red-300'
-                  : 'btn-primary'
-              }`}
-            >
-              {followLoading ? '…' : isFollowing ? 'Following' : isRequested ? 'Requested' : 'Follow'}
-            </button>
-          )}
-          {isMe && (
-            <div className="flex gap-2">
-              <button onClick={() => setShowEditProfile(true)} className="btn-secondary text-sm">Edit Profile</button>
-              <button onClick={() => setShowAccountSettings(true)} className="btn-secondary text-sm">Account</button>
-            </div>
-          )}
-        </div>
-
-        {/* Spotify section — only on own profile */}
-        {isMe && spotifyStatus !== null && (
-          <div className="mt-5 pt-5 border-t border-gray-800">
-            {spotifyStatus.connected ? (
-              <div className="flex flex-col gap-3">
-                <button
-                  onClick={() => setShowSpotifyMenu(m => !m)}
-                  className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-green-700/30 border border-green-700/50 text-green-400 text-sm font-semibold w-fit transition-colors hover:bg-green-700/50"
-                >
-                  <SpotifyIcon className="w-4 h-4" />
-                  Connected
-                  <span className="text-green-600 text-xs ml-1">{showSpotifyMenu ? '▲' : '▼'}</span>
+              {isMe ? (
+                <Link to="/stats" className="hover:text-white transition-colors">
+                  <strong className="text-white">{reviews.length}</strong> reviews
+                </Link>
+              ) : (
+                <button onClick={() => setTab('reviews')} className="hover:text-white transition-colors">
+                  <strong className="text-white">{reviews.length}</strong> reviews
                 </button>
-                {showSpotifyMenu && (
-                  <div className="flex items-center gap-3 flex-wrap pl-1">
-                    {spotifyStatus.display_name && (
-                      <span className="text-gray-400 text-sm">{spotifyStatus.display_name}</span>
-                    )}
-                    <button
-                      onClick={() => { setShowImport(true); setShowSpotifyMenu(false) }}
-                      className="px-4 py-1.5 rounded-full text-sm font-medium bg-green-700/30 text-green-400 border border-green-700/50 hover:bg-green-700/50 transition-colors"
-                    >
-                      Import Music
-                    </button>
-                    <button
-                      onClick={disconnectSpotify}
-                      className="px-4 py-1.5 rounded-full text-sm font-medium border border-gray-700 text-gray-500 hover:border-red-700 hover:text-red-400 transition-colors"
-                    >
-                      Disconnect
-                    </button>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <button
-                onClick={connectSpotify}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-green-600 hover:bg-green-500 text-white text-sm font-semibold transition-colors"
-              >
-                <SpotifyIcon className="w-4 h-4" />
-                Connect Spotify
-              </button>
-            )}
+              )}
+            </div>
           </div>
-        )}
-      </div>
-
-      {/* Tabs */}
-      <div className="flex flex-wrap gap-1 bg-gray-900 rounded-xl p-1 w-fit mb-6">
-        {[
-          'reviews',
-          'lists',
-          'activity',
-          ...(isMe ? ['recs'] : []),
-          ...(isMe && profile?.is_private ? ['requests'] : []),
-          ...(isMe && spotifyStatus?.connected ? ['spotify playlists'] : []),
-        ].map(t => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`px-5 py-2 rounded-lg text-sm font-medium transition-colors capitalize ${
-              tab === t ? 'bg-violet-600 text-white' : 'text-gray-400 hover:text-white'
-            }`}
-          >
-            {t === 'spotify playlists' ? (
-              <span className="flex items-center gap-1.5">
-                <SpotifyIcon className="w-3.5 h-3.5 text-green-400" />
-                Playlists
-              </span>
-            ) : t === 'recs' ? (
-              <RecsTabLabel />
-            ) : t === 'requests' ? (
-              <FollowRequestsTabLabel />
-            ) : t}
-          </button>
-        ))}
-      </div>
-
-      {tab === 'reviews' && (
-        <div className="space-y-3">
-          {reviews.length === 0 ? (
-            <div className="card p-8 text-center text-gray-500">No reviews yet.</div>
-          ) : (
-            reviews.map(r => <ReviewItem key={r.id} review={r} />)
-          )}
         </div>
-      )}
+      </div>
 
-      {tab === 'lists' && (
-        <ListsTab lists={lists} isMe={isMe} />
-      )}
+      {/* Private account gate: hide all content from non-followers */}
+      {profile.is_private && !isMe && !isFollowing ? (
+        <div className="card p-12 text-center space-y-3">
+          <div className="text-5xl">🔒</div>
+          <p className="text-white font-semibold text-lg">This account is private</p>
+          <p className="text-gray-400 text-sm">
+            {isRequested
+              ? 'Your follow request is pending. Once approved you\'ll be able to see their content.'
+              : 'Follow this account to see their reviews, lists, and activity.'}
+          </p>
+        </div>
+      ) : (
+        <>
+          {/* Tabs */}
+          <div className="flex flex-wrap gap-1 bg-gray-900 rounded-xl p-1 w-fit mb-6">
+            {[
+              'reviews',
+              'lists',
+              'activity',
+              ...(isMe ? ['recs'] : []),
+              ...(isMe ? ['requests'] : []),
+              ...(isMe && spotifyStatus?.connected ? ['spotify playlists'] : []),
+            ].map(t => (
+              <button
+                key={t}
+                onClick={() => setTab(t)}
+                className={`px-5 py-2 rounded-lg text-sm font-medium transition-colors capitalize ${
+                  tab === t ? 'bg-violet-600 text-white' : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                {t === 'spotify playlists' ? (
+                  <span className="flex items-center gap-1.5">
+                    <SpotifyIcon className="w-3.5 h-3.5 text-green-400" />
+                    Playlists
+                  </span>
+                ) : t === 'recs' ? (
+                  <RecsTabLabel />
+                ) : t === 'requests' ? (
+                  <FollowRequestsTabLabel />
+                ) : t}
+              </button>
+            ))}
+          </div>
 
-      {tab === 'activity' && (
-        <ActivityTab username={profile.username} />
-      )}
+          {tab === 'reviews' && (
+            <ReviewsTab reviews={reviews} />
+          )}
 
-      {tab === 'requests' && isMe && (
-        <FollowRequestsTab />
-      )}
+          {tab === 'lists' && (
+            <ListsTab lists={lists} isMe={isMe} />
+          )}
 
-      {tab === 'recs' && isMe && (
-        <RecsTab />
-      )}
+          {tab === 'activity' && (
+            <ActivityTab username={profile.username} />
+          )}
 
-      {tab === 'spotify playlists' && isMe && spotifyStatus?.connected && (
-        <SpotifyPlaylistsTab />
+          {tab === 'requests' && isMe && (
+            <FollowRequestsTab />
+          )}
+
+          {tab === 'recs' && isMe && (
+            <RecsTab />
+          )}
+
+          {tab === 'spotify playlists' && isMe && spotifyStatus?.connected && (
+            <SpotifyPlaylistsTab />
+          )}
+        </>
       )}
 
       {/* Import modal */}
@@ -351,10 +383,13 @@ const ACTION_LABELS = {
 function ActivityTab({ username }) {
   const [activities, setActivities] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [page, setPage] = useState(1)
+  const PAGE_SIZE = 15
 
   useEffect(() => {
     setLoading(true)
-    axios.get(`/api/users/${username}/activity?limit=30`)
+    setPage(1)
+    axios.get(`/api/users/${username}/activity?limit=100`)
       .then(r => setActivities(r.data))
       .finally(() => setLoading(false))
   }, [username])
@@ -371,9 +406,13 @@ function ActivityTab({ username }) {
     )
   }
 
+  const totalPages = Math.ceil(activities.length / PAGE_SIZE)
+  const paged = activities.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+
   return (
     <div className="space-y-2">
-      {activities.map(a => <ActivityItem key={a.id} activity={a} />)}
+      {paged.map(a => <ActivityItem key={a.id} activity={a} />)}
+      <Pagination page={page} totalPages={totalPages} onPage={setPage} />
     </div>
   )
 }
@@ -531,6 +570,8 @@ function RecsTabLabel() {
 function RecsTab() {
   const [recs, setRecs]   = useState(null)
   const [loading, setLoading] = useState(true)
+  const [page, setPage] = useState(1)
+  const REC_PAGE_SIZE = 10
 
   useEffect(() => {
     axios.get('/api/social/recommendations')
@@ -564,6 +605,8 @@ function RecsTab() {
   }
 
   const hasUnread = recs.some(r => !r.is_read)
+  const totalPages = Math.ceil(recs.length / REC_PAGE_SIZE)
+  const pagedRecs = recs.slice((page - 1) * REC_PAGE_SIZE, page * REC_PAGE_SIZE)
 
   return (
     <div className="space-y-3">
@@ -574,9 +617,10 @@ function RecsTab() {
           </button>
         </div>
       )}
-      {recs.map(rec => (
+      {pagedRecs.map(rec => (
         <RecCard key={rec.id} rec={rec} onRead={markRead} />
       ))}
+      <Pagination page={page} totalPages={totalPages} onPage={setPage} />
     </div>
   )
 }
@@ -684,11 +728,14 @@ function ImportAsListButton({ playlistId }) {
 
 // ── Spotify Playlists Tab ─────────────────────────────────────────────────────
 
+const PLAYLIST_PAGE_SIZE = 20
+
 function SpotifyPlaylistsTab() {
   const [playlists, setPlaylists]     = useState([])
   const [loading, setLoading]         = useState(true)
   const [error, setError]             = useState(null)
   const [search, setSearch]           = useState('')
+  const [page, setPage]               = useState(1)
   const [expanded, setExpanded]       = useState(null)
   const [loadingId, setLoadingId]     = useState(null)
   const [trackErrors, setTrackErrors] = useState({})   // { [playlistId]: errorMsg }
@@ -781,6 +828,8 @@ function SpotifyPlaylistsTab() {
   const visible = search.trim()
     ? playlists.filter(p => p.name.toLowerCase().includes(search.toLowerCase()))
     : playlists
+  const totalPlaylistPages = Math.ceil(visible.length / PLAYLIST_PAGE_SIZE)
+  const pagedPlaylists = visible.slice((page - 1) * PLAYLIST_PAGE_SIZE, page * PLAYLIST_PAGE_SIZE)
 
   return (
     <div>
@@ -792,7 +841,7 @@ function SpotifyPlaylistsTab() {
           type="text"
           placeholder="Search playlists…"
           value={search}
-          onChange={e => setSearch(e.target.value)}
+          onChange={e => { setSearch(e.target.value); setPage(1) }}
           className="input w-full pl-9 py-2 text-sm"
         />
         {search && (
@@ -806,7 +855,7 @@ function SpotifyPlaylistsTab() {
         <div className="card p-6 text-center text-gray-500 text-sm">No playlists match "{search}"</div>
       ) : (
       <div className="space-y-2">
-      {visible.map(playlist => (
+      {pagedPlaylists.map(playlist => (
         <div key={playlist.id} className="card overflow-hidden">
           {/* Playlist header */}
           <button
@@ -903,6 +952,7 @@ function SpotifyPlaylistsTab() {
           )}
         </div>
       ))}
+      <Pagination page={page} totalPages={totalPlaylistPages} onPage={setPage} />
       </div>
       )}
     </div>
@@ -1126,7 +1176,11 @@ function EditProfileModal({ profile, onClose, onSaved }) {
   const [avatarPreview, setAvatarPreview] = useState(profile.avatar_url ?? null)
   const [avatarUploading, setAvatarUploading] = useState(false)
   const [avatarError, setAvatarError] = useState(null)
-  const fileInputRef = useRef(null)
+  const [bannerPreview, setBannerPreview]   = useState(profile.banner_url ?? null)
+  const [bannerUploading, setBannerUploading] = useState(false)
+  const [bannerError, setBannerError]     = useState(null)
+  const fileInputRef   = useRef(null)
+  const bannerInputRef = useRef(null)
 
   // Music preferences state
   const [availableGenres, setAvailableGenres] = useState([])
@@ -1174,6 +1228,32 @@ function EditProfileModal({ profile, onClose, onSaved }) {
     }
   }
 
+  async function handleBannerChange(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setBannerPreview(URL.createObjectURL(file))
+    setBannerError(null)
+    setBannerUploading(true)
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      const { data } = await axios.post('/api/users/me/banner', form)
+      setBannerPreview(data.banner_url)
+    } catch (e) {
+      setBannerError(e.response?.data?.detail || 'Upload failed')
+      setBannerPreview(profile.banner_url ?? null)
+    } finally {
+      setBannerUploading(false)
+    }
+  }
+
+  async function removeBanner() {
+    try {
+      await axios.delete('/api/users/me/banner')
+      setBannerPreview(null)
+    } catch {}
+  }
+
   async function save() {
     const trimmed = username.trim()
     if (!trimmed) { setError('Username cannot be empty'); return }
@@ -1198,6 +1278,7 @@ function EditProfileModal({ profile, onClose, onSaved }) {
         username: data.username,
         bio: data.bio,
         avatar_url: avatarPreview ?? data.avatar_url,
+        banner_url: bannerPreview,
         is_private: data.is_private,
         music_preferences: newPrefs,
       })
@@ -1216,6 +1297,47 @@ function EditProfileModal({ profile, onClose, onSaved }) {
           <button onClick={onClose} className="text-gray-500 hover:text-white text-xl leading-none">&times;</button>
         </div>
         <div className="p-5 space-y-4 overflow-y-auto flex-1">
+          {/* Banner picker */}
+          <div>
+            <p className="text-xs text-gray-400 mb-1.5">Banner image</p>
+            <button
+              type="button"
+              onClick={() => bannerInputRef.current?.click()}
+              className="relative group w-full h-24 rounded-xl overflow-hidden bg-gradient-to-br from-violet-950/60 to-gray-800 border border-gray-700 hover:border-violet-600 transition-colors"
+              title="Change banner"
+            >
+              {bannerPreview && (
+                <img src={bannerPreview} alt="banner" className="w-full h-full object-cover" />
+              )}
+              <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                {bannerUploading ? (
+                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <span className="text-white text-xs font-medium">
+                    {bannerPreview ? 'Change banner' : '+ Add banner'}
+                  </span>
+                )}
+              </div>
+            </button>
+            {bannerPreview && (
+              <button
+                type="button"
+                onClick={removeBanner}
+                className="text-xs text-gray-500 hover:text-red-400 transition-colors mt-1"
+              >
+                Remove banner
+              </button>
+            )}
+            {bannerError && <p className="text-red-400 text-xs mt-1">{bannerError}</p>}
+            <input
+              ref={bannerInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/gif"
+              className="hidden"
+              onChange={handleBannerChange}
+            />
+          </div>
+
           {/* Avatar picker */}
           <div className="flex flex-col items-center gap-2">
             <button
@@ -1254,11 +1376,12 @@ function EditProfileModal({ profile, onClose, onSaved }) {
           <div>
             <label className="block text-sm text-gray-400 mb-1">Username</label>
             <input
-              className="input w-full"
+              className={`input w-full ${error ? 'border-red-500 focus:border-red-500' : ''}`}
               value={username}
-              onChange={e => setUsername(e.target.value)}
+              onChange={e => { setUsername(e.target.value); setError(null) }}
               maxLength={50}
             />
+            {error && <p className="text-red-400 text-xs mt-1">{error}</p>}
             <p className="text-xs text-gray-600 mt-1">This is also your login name.</p>
           </div>
           <div>
@@ -1417,7 +1540,6 @@ function EditProfileModal({ profile, onClose, onSaved }) {
               <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${isPrivate ? 'translate-x-6' : 'translate-x-1'}`} />
             </button>
           </div>
-          {error && <p className="text-red-400 text-sm">{error}</p>}
         </div>
         <div className="flex justify-end gap-2 p-5 border-t border-gray-800 shrink-0">
           <button onClick={onClose} className="btn-secondary text-sm">Cancel</button>
@@ -1633,6 +1755,45 @@ function SpotifyIcon({ className = '' }) {
   )
 }
 
+function ReviewsTab({ reviews }) {
+  const [page, setPage] = useState(1)
+  const PAGE_SIZE = 10
+  if (reviews.length === 0) {
+    return <div className="card p-8 text-center text-gray-500">No reviews yet.</div>
+  }
+  const totalPages = Math.ceil(reviews.length / PAGE_SIZE)
+  const paged = reviews.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+  return (
+    <div className="space-y-3">
+      {paged.map(r => <ReviewItem key={r.id} review={r} />)}
+      <Pagination page={page} totalPages={totalPages} onPage={setPage} />
+    </div>
+  )
+}
+
+function Pagination({ page, totalPages, onPage }) {
+  if (totalPages <= 1) return null
+  return (
+    <div className="flex items-center justify-center gap-3 mt-4 pt-2">
+      <button
+        onClick={() => onPage(page - 1)}
+        disabled={page === 1}
+        className="px-3 py-1.5 rounded-lg text-sm text-gray-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+      >
+        ← Prev
+      </button>
+      <span className="text-sm text-gray-500">{page} / {totalPages}</span>
+      <button
+        onClick={() => onPage(page + 1)}
+        disabled={page === totalPages}
+        className="px-3 py-1.5 rounded-lg text-sm text-gray-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+      >
+        Next →
+      </button>
+    </div>
+  )
+}
+
 function ReviewItem({ review }) {
   return (
     <div className="card p-4 flex gap-4 items-start">
@@ -1658,9 +1819,12 @@ function ReviewItem({ review }) {
   )
 }
 
+const LIST_PAGE_SIZE = 12
+
 function ListsTab({ lists, isMe }) {
   const { user } = useAuth()
   const [selectedList, setSelectedList] = useState(null)
+  const [page, setPage] = useState(1)
   const [likeState, setLikeState] = useState(() => {
     const map = {}
     lists.forEach(l => { map[l.id] = { liked: l.is_liked ?? false, count: l.like_count ?? 0 } })
@@ -1684,37 +1848,47 @@ function ListsTab({ lists, isMe }) {
         </div>
       )}
       {lists.length === 0 ? (
-        <div className="card p-8 text-center text-gray-500">No public lists.</div>
-      ) : (
-        <div className="grid sm:grid-cols-2 gap-4">
-          {lists.map(l => (
-            <button
-              key={l.id}
-              onClick={() => setSelectedList(l)}
-              className="card p-4 hover:border-violet-700 transition-colors group text-left"
-            >
-              <p className="font-medium text-white group-hover:text-violet-400 transition-colors">{l.name}</p>
-              {l.description && <p className="text-gray-500 text-sm mt-0.5 line-clamp-2">{l.description}</p>}
-              <div className="flex items-center justify-between mt-2">
-                <p className="text-gray-600 text-xs">{l.item_count} item{l.item_count !== 1 ? 's' : ''} · {l.list_type}</p>
-                <div className="flex items-center gap-1.5">
-                  {(likeState[l.id]?.count ?? 0) > 0 && (
-                    <span className="text-gray-500 text-xs">{likeState[l.id]?.count}</span>
-                  )}
-                  {user && !isMe && (
-                    <button
-                      onClick={e => toggleLike(l.id, e)}
-                      className={`text-sm transition-colors ${likeState[l.id]?.liked ? 'text-pink-400' : 'text-gray-600 hover:text-pink-400'}`}
-                      title={likeState[l.id]?.liked ? 'Unlike' : 'Like this list'}
-                    >
-                      ♥
-                    </button>
-                  )}
-                </div>
-              </div>
-            </button>
-          ))}
+        <div className="card p-8 text-center text-gray-500">
+          {isMe
+            ? <><p className="mb-3">You haven't created any lists yet.</p><Link to="/lists" className="btn-primary text-sm">Create your first list</Link></>
+            : 'No public lists.'}
         </div>
+      ) : (
+        <>
+          <div className="grid sm:grid-cols-2 gap-4">
+            {lists.slice((page - 1) * LIST_PAGE_SIZE, page * LIST_PAGE_SIZE).map(l => (
+              <button
+                key={l.id}
+                onClick={() => isMe && !l.is_public ? null : setSelectedList(l)}
+                className="card p-4 hover:border-violet-700 transition-colors group text-left"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <p className="font-medium text-white group-hover:text-violet-400 transition-colors">{l.name}</p>
+                  {!l.is_public && <span className="text-gray-600 text-xs shrink-0 mt-0.5">🔒 Private</span>}
+                </div>
+                {l.description && <p className="text-gray-500 text-sm mt-0.5 line-clamp-2">{l.description}</p>}
+                <div className="flex items-center justify-between mt-2">
+                  <p className="text-gray-600 text-xs">{l.item_count} item{l.item_count !== 1 ? 's' : ''} · {l.list_type}</p>
+                  <div className="flex items-center gap-1.5">
+                    {(likeState[l.id]?.count ?? 0) > 0 && (
+                      <span className="text-gray-500 text-xs">{likeState[l.id]?.count}</span>
+                    )}
+                    {user && !isMe && (
+                      <button
+                        onClick={e => toggleLike(l.id, e)}
+                        className={`text-sm transition-colors ${likeState[l.id]?.liked ? 'text-pink-400' : 'text-gray-600 hover:text-pink-400'}`}
+                        title={likeState[l.id]?.liked ? 'Unlike' : 'Like this list'}
+                      >
+                        ♥
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+          <Pagination page={page} totalPages={Math.ceil(lists.length / LIST_PAGE_SIZE)} onPage={setPage} />
+        </>
       )}
       {selectedList && (
         <ListDetailModal list={selectedList} onClose={() => setSelectedList(null)} />

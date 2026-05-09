@@ -2,7 +2,7 @@ import asyncio
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import text
+from sqlalchemy import text, or_
 from sqlalchemy.orm import Session, joinedload
 
 from .. import models
@@ -119,9 +119,25 @@ async def search(q: str, db: Session = Depends(get_db)):
     like = f"%{q}%"
 
     artists = db.query(models.Artist).filter(models.Artist.name.ilike(like)).limit(5).all()
-    albums  = db.query(models.Album).filter(models.Album.title.ilike(like)).limit(8).all()
-    songs   = db.query(models.Song).filter(models.Song.title.ilike(like)).limit(8).all()
+    albums  = (
+        db.query(models.Album)
+        .join(models.Artist, models.Artist.id == models.Album.artist_id)
+        .filter(or_(models.Album.title.ilike(like), models.Artist.name.ilike(like)))
+        .limit(8).all()
+    )
+    songs   = (
+        db.query(models.Song)
+        .join(models.Artist, models.Artist.id == models.Song.artist_id)
+        .filter(or_(models.Song.title.ilike(like), models.Artist.name.ilike(like)))
+        .limit(8).all()
+    )
     users   = db.query(models.User).filter(models.User.username.ilike(like)).limit(5).all()
+    lists   = (
+        db.query(models.List)
+        .options(joinedload(models.List.user), joinedload(models.List.items))
+        .filter(models.List.name.ilike(like), models.List.is_public == True)
+        .limit(8).all()
+    )
 
     await _enrich_missing_images(db, artists, albums)
 
@@ -151,6 +167,14 @@ async def search(q: str, db: Session = Depends(get_db)):
         "users": [
             {"username": u.username, "avatar_url": u.avatar_url, "bio": u.bio}
             for u in users
+        ],
+        "lists": [
+            {
+                "id": l.id, "name": l.name, "list_type": l.list_type,
+                "item_count": len(l.items),
+                "owner_username": l.user.username if l.user else None,
+            }
+            for l in lists
         ],
     }
 

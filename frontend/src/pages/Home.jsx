@@ -13,39 +13,56 @@ export default function Home() {
   const [feed, setFeed]                         = useState([])
   const [recommended, setRecommended]           = useState([])
   const [recommendedArtists, setRecArtists]     = useState([])
-  const [forYouAlbums, setForYouAlbums]         = useState([])
-  const [forYouSongs, setForYouSongs]           = useState([])
-  const [forYouSource, setForYouSource]         = useState(null)
+  const [recentAlbums, setRecentAlbums]         = useState([])
+  const [recentSongs, setRecentSongs]           = useState([])
+  const [recentAlbumsLoading, setRecentAlbumsLoading] = useState(true)
+  const [recentSongsLoading, setRecentSongsLoading]   = useState(true)
   const [suggested, setSuggested]               = useState([])
   const [albumsLoading, setAlbumsLoading]       = useState(true)
   const [artistsLoading, setArtistsLoading]     = useState(true)
   const [songsLoading, setSongsLoading]         = useState(true)
 
   useEffect(() => {
-    axios.get('/api/music/albums?limit=12&sort=top_rated')
+    axios.get('/api/music/albums?limit=12&sort=trending')
       .then(r => setAlbums(r.data)).catch(() => {}).finally(() => setAlbumsLoading(false))
-    axios.get('/api/music/artists?limit=12&sort=top_rated')
+    axios.get('/api/music/artists?limit=12&sort=trending')
       .then(r => setArtists(r.data)).catch(() => {}).finally(() => setArtistsLoading(false))
-    axios.get('/api/music/songs?limit=6&sort=top_rated')
+    axios.get('/api/music/songs?limit=6&sort=trending')
       .then(r => setSongs(r.data)).catch(() => {}).finally(() => setSongsLoading(false))
-
     if (user) {
-      axios.get(`/api/users/${user.username}/activity?limit=15`)
+      axios.get(`/api/users/${user.username}/reviews?limit=30`)
+        .then(r => {
+          const reviews = r.data
+          const seenAlbums = new Set(), seenSongs = new Set()
+          const albums = [], songs = []
+          for (const rev of reviews) {
+            if (rev.target_type === 'album' && rev.album_id && !seenAlbums.has(rev.album_id) && albums.length < 6) {
+              seenAlbums.add(rev.album_id)
+              albums.push({ id: rev.album_id, title: rev.target_title, cover_url: rev.target_cover, artist: { name: rev.target_artist } })
+            }
+            if (rev.target_type === 'song' && rev.song_id && !seenSongs.has(rev.song_id) && songs.length < 6) {
+              seenSongs.add(rev.song_id)
+              songs.push({ id: rev.song_id, title: rev.target_title, album: { cover_url: rev.target_cover }, artist: { name: rev.target_artist } })
+            }
+          }
+          setRecentAlbums(albums)
+          setRecentSongs(songs)
+        })
+        .catch(() => {})
+        .finally(() => { setRecentAlbumsLoading(false); setRecentSongsLoading(false) })
+
+      axios.get(`/api/users/${user.username}/activity?limit=60&days=21`)
         .then(r => setFeed(r.data))
         .catch(() => {})
       axios.get('/api/music/recommended?song_limit=8')
         .then(r => { setRecommended(r.data.songs); setRecArtists(r.data.artists) })
         .catch(() => {})
-      axios.get('/api/recommendations/me?album_limit=6&song_limit=6')
-        .then(r => {
-          setForYouAlbums(r.data.albums)
-          setForYouSongs(r.data.songs)
-          setForYouSource(r.data.source)
-        })
-        .catch(() => {})
       axios.get('/api/users/suggested?limit=5')
         .then(r => setSuggested(r.data))
         .catch(() => {})
+    } else {
+      setRecentAlbumsLoading(false)
+      setRecentSongsLoading(false)
     }
   }, [user])
 
@@ -87,9 +104,9 @@ export default function Home() {
         </section>
       )}
 
-      {/* Artists */}
+      {/* Trending Artists */}
       <section>
-        <SectionHeader title="Top Rated Artists" href="/discover?tab=artists" />
+        <SectionHeader title="Trending Artists" href="/discover?tab=artists&sort=trending" />
         {artistsLoading ? (
           <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-4">
             {Array.from({ length: 6 }).map((_, i) => <ArtistSkeleton key={i} />)}
@@ -101,9 +118,9 @@ export default function Home() {
         )}
       </section>
 
-      {/* Albums */}
+      {/* Trending Albums */}
       <section>
-        <SectionHeader title="Top Rated Albums" href="/discover?tab=albums" />
+        <SectionHeader title="Trending Albums" href="/discover?tab=albums&sort=trending" />
         {albumsLoading ? (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
             {Array.from({ length: 6 }).map((_, i) => <AlbumSkeleton key={i} />)}
@@ -115,9 +132,9 @@ export default function Home() {
         )}
       </section>
 
-      {/* Songs */}
+      {/* Trending Songs */}
       <section>
-        <SectionHeader title="Top Rated Songs" href="/discover?tab=songs" />
+        <SectionHeader title="Trending Songs" href="/discover?tab=songs&sort=trending" />
         {songsLoading ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {Array.from({ length: 4 }).map((_, i) => <SongSkeleton key={i} />)}
@@ -128,55 +145,6 @@ export default function Home() {
           </div>
         )}
       </section>
-
-      {/* Albums For You — vector-based */}
-      {user && forYouAlbums.length > 0 && (
-        <section>
-          <div className="flex items-center justify-between mb-5">
-            <div>
-              <h2 className="text-xl font-bold text-white">Albums For You</h2>
-              <p className="text-gray-500 text-sm mt-0.5">
-                {forYouSource === 'preferences'
-                  ? 'Personalized for your taste and stated interests'
-                  : forYouSource === 'embedding'
-                  ? 'Matched to your taste using semantic similarity'
-                  : forYouSource === 'centroid'
-                  ? 'Based on your listening history'
-                  : 'Top picks from the Tunelog community'}
-              </p>
-            </div>
-            {(forYouSource === 'embedding' || forYouSource === 'centroid') && (
-              <span className="text-xs text-violet-400/70 bg-violet-900/20 border border-violet-800/40 rounded-full px-3 py-1">
-                {forYouSource === 'embedding' ? 'AI-powered' : 'Personalized'}
-              </span>
-            )}
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
-            {forYouAlbums.map(a => <ForYouAlbumCard key={a.id} album={a} />)}
-          </div>
-        </section>
-      )}
-
-      {/* Songs For You — vector-based */}
-      {user && forYouSongs.length > 0 && (
-        <section>
-          <div className="mb-5">
-            <h2 className="text-xl font-bold text-white">Songs For You</h2>
-            <p className="text-gray-500 text-sm mt-0.5">
-              {forYouSource === 'preferences'
-                ? 'Personalized for your taste and stated interests'
-                : forYouSource === 'embedding'
-                ? 'Discovered via your taste profile'
-                : forYouSource === 'centroid'
-                ? 'Based on your listening history'
-                : 'Trending on Tunelog'}
-            </p>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {forYouSongs.map(s => <ForYouSongRow key={s.id} song={s} />)}
-          </div>
-        </section>
-      )}
 
       {/* Recommended Artists */}
       {user && recommendedArtists.length > 0 && (
@@ -194,11 +162,9 @@ export default function Home() {
       {/* Recommended Songs */}
       {user && recommended.length > 0 && (
         <section>
-          <div className="flex items-center justify-between mb-5">
-            <div>
-              <h2 className="text-xl font-bold text-white">Recommended Songs</h2>
-              <p className="text-gray-500 text-sm mt-0.5">Picked for you based on your taste</p>
-            </div>
+          <div className="mb-5">
+            <h2 className="text-xl font-bold text-white">Recommended Songs</h2>
+            <p className="text-gray-500 text-sm mt-0.5">Picked for you based on your taste</p>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {recommended.map(s => <RecommendedSongRow key={s.id} song={s} />)}
@@ -206,7 +172,43 @@ export default function Home() {
         </section>
       )}
 
-      {/* Suggested users */}
+      {/* Recently Reviewed Albums — logged-in user only */}
+      {user && (
+        <section>
+          <SectionHeader title="Your Recently Reviewed Albums" />
+          {recentAlbumsLoading ? (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
+              {Array.from({ length: 6 }).map((_, i) => <AlbumSkeleton key={i} />)}
+            </div>
+          ) : recentAlbums.length > 0 ? (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
+              {recentAlbums.map(a => <AlbumCard key={a.id} album={a} />)}
+            </div>
+          ) : (
+            <p className="text-gray-500 text-sm">You haven't reviewed any albums yet.</p>
+          )}
+        </section>
+      )}
+
+      {/* Recently Reviewed Songs — logged-in user only */}
+      {user && (
+        <section>
+          <SectionHeader title="Your Recently Reviewed Songs" />
+          {recentSongsLoading ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {Array.from({ length: 4 }).map((_, i) => <SongSkeleton key={i} />)}
+            </div>
+          ) : recentSongs.length > 0 ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {recentSongs.map(s => <SongRow key={s.id} song={s} />)}
+            </div>
+          ) : (
+            <p className="text-gray-500 text-sm">You haven't reviewed any songs yet.</p>
+          )}
+        </section>
+      )}
+
+      {/* People to Follow */}
       {user && suggested.length > 0 && (
         <section>
           <SectionHeader title="People to Follow" />
@@ -218,21 +220,54 @@ export default function Home() {
 
       {/* Activity feed */}
       {user && (
-        <section>
-          <h2 className="text-xl font-bold text-white mb-5">Your Activity</h2>
-          {feed.length === 0 ? (
-            <div className="card p-10 text-center text-gray-500">
-              <p className="mb-2">No activity yet.</p>
-              <p><Link to="/discover" className="link-purple">Start exploring music →</Link></p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {feed.map(a => <ActivityItem key={a.id} item={a} />)}
-            </div>
-          )}
-        </section>
+        <ActivityFeedSection feed={feed} />
       )}
     </div>
+  )
+}
+
+const FEED_PAGE_SIZE = 10
+
+function ActivityFeedSection({ feed }) {
+  const [page, setPage] = useState(1)
+  const totalPages = Math.ceil(feed.length / FEED_PAGE_SIZE)
+  const paged = feed.slice((page - 1) * FEED_PAGE_SIZE, page * FEED_PAGE_SIZE)
+
+  return (
+    <section>
+      <h2 className="text-xl font-bold text-white mb-5">Your Recent Activity</h2>
+      {feed.length === 0 ? (
+        <div className="card p-10 text-center text-gray-500">
+          <p className="mb-2">No activity in the past 3 weeks.</p>
+          <p><Link to="/discover" className="link-purple">Start exploring music →</Link></p>
+        </div>
+      ) : (
+        <>
+          <div className="space-y-3">
+            {paged.map(a => <ActivityItem key={a.id} item={a} />)}
+          </div>
+          {totalPages > 1 && (
+            <div className="flex items-center justify-center gap-3 mt-4 pt-2">
+              <button
+                onClick={() => setPage(p => p - 1)}
+                disabled={page === 1}
+                className="px-3 py-1.5 rounded-lg text-sm text-gray-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              >
+                ← Prev
+              </button>
+              <span className="text-sm text-gray-500">{page} / {totalPages}</span>
+              <button
+                onClick={() => setPage(p => p + 1)}
+                disabled={page === totalPages}
+                className="px-3 py-1.5 rounded-lg text-sm text-gray-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              >
+                Next →
+              </button>
+            </div>
+          )}
+        </>
+      )}
+    </section>
   )
 }
 
