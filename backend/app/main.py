@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from .seed import seed_database
-from .routers import auth, users, music, lists, social, search, stats, spotify, recommendations, charts
+from .routers import auth, users, music, lists, social, search, stats, spotify, recommendations, charts, notifications
 
 STATIC_DIR = Path(__file__).parent / "static"
 AVATARS_DIR = STATIC_DIR / "avatars"
@@ -40,6 +40,7 @@ app.include_router(stats.router)
 app.include_router(spotify.router)
 app.include_router(recommendations.router)
 app.include_router(charts.router)
+app.include_router(notifications.router)
 
 
 async def _backfill_images():
@@ -93,6 +94,7 @@ def _wait_for_db(timeout: int = 30) -> bool:
 
 @app.on_event("startup")
 async def on_startup():
+    import asyncio
     _wait_for_db(timeout=30)
 
     # Seed only if the database is empty (tables must exist — run migrations first)
@@ -101,7 +103,41 @@ async def on_startup():
     except Exception as e:
         print(f"Seed skipped: {e}")
 
-    await _backfill_images()
+    # Ensure genre associations exist — skip if artist_genre already populated
+    try:
+        from .routers.charts import _do_propagate_genres, _do_cleanup_genres
+        from .database import SessionLocal
+        from sqlalchemy import text
+        _db = SessionLocal()
+        try:
+            already = _db.execute(text("SELECT 1 FROM artist_genre LIMIT 1")).fetchone()
+            if not already:
+                prop = _do_propagate_genres(_db)
+                removed = _do_cleanup_genres(_db)
+                print(f"[startup] Genres: tagged {prop['artists_tagged']} artist(s), {prop['albums_tagged']} album(s); removed {removed} unused genre(s)")
+        finally:
+            _db.close()
+    except Exception as e:
+        import traceback
+        print(f"[startup] Genre sync skipped: {e}")
+        traceback.print_exc()
+
+    # Normalise genre names on every startup (fast, idempotent)
+    try:
+        from .routers.charts import _do_fix_genres
+        from .database import SessionLocal
+        _db = SessionLocal()
+        try:
+            result = _do_fix_genres(_db)
+            if result["removed"]:
+                print(f"[startup] Genre fix: {result['merges']} merged, {result['splits']} split, {result['removed']} removed")
+        finally:
+            _db.close()
+    except Exception as e:
+        print(f"[startup] Genre fix skipped: {e}")
+
+    # Image backfill runs in the background so it doesn't block server startup
+    asyncio.create_task(_backfill_images())
 
 
 @app.get("/api")

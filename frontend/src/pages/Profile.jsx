@@ -641,6 +641,47 @@ function RecCard({ rec, onRead }) {
   )
 }
 
+// ── Import playlist as Tunelog list button ────────────────────────────────────
+
+function ImportAsListButton({ playlistId }) {
+  const [status, setStatus] = useState(null) // null | 'loading' | {list_id, tracks_added, tracks_total} | 'error'
+
+  async function handleClick(e) {
+    e.stopPropagation()
+    if (status === 'loading') return
+    setStatus('loading')
+    try {
+      const { data } = await axios.post('/api/spotify/import-playlist-as-list', { playlist_id: playlistId })
+      setStatus(data)
+    } catch {
+      setStatus('error')
+      setTimeout(() => setStatus(null), 3000)
+    }
+  }
+
+  if (status && status !== 'loading' && status !== 'error') {
+    return (
+      <Link
+        to={`/lists/${status.list_id}`}
+        onClick={e => e.stopPropagation()}
+        className="text-xs px-2.5 py-1 rounded-full bg-violet-700/30 text-violet-400 border border-violet-700/50 hover:bg-violet-700/50 transition-colors shrink-0"
+      >
+        View list ({status.tracks_added}/{status.tracks_total})
+      </Link>
+    )
+  }
+
+  return (
+    <button
+      onClick={handleClick}
+      disabled={status === 'loading'}
+      className="text-xs px-2.5 py-1 rounded-full bg-green-700/20 text-green-400 border border-green-700/40 hover:bg-green-700/40 transition-colors disabled:opacity-50 shrink-0"
+    >
+      {status === 'loading' ? '…' : status === 'error' ? 'Failed' : 'Save as list'}
+    </button>
+  )
+}
+
 // ── Spotify Playlists Tab ─────────────────────────────────────────────────────
 
 function SpotifyPlaylistsTab() {
@@ -780,6 +821,7 @@ function SpotifyPlaylistsTab() {
             <div className="flex-1 min-w-0">
               <p className="text-white font-medium truncate">{playlist.name}</p>
             </div>
+            <ImportAsListButton playlistId={playlist.id} />
             <span className="text-gray-500 text-sm ml-2 shrink-0">{expanded === playlist.id ? '▲' : '▼'}</span>
           </button>
 
@@ -1062,6 +1104,9 @@ function ImportModal({ onClose }) {
 
 // ── Edit Profile Modal ────────────────────────────────────────────────────────
 
+const MAX_GENRES = 5
+const MAX_MOODS  = 5
+
 const POPULAR_GENRES = [
   'Pop', 'Rock', 'Hip-Hop', 'R&B', 'Electronic', 'Indie', 'Alternative',
   'Jazz', 'Classical', 'Country', 'Folk', 'Metal', 'Soul', 'Latin',
@@ -1095,15 +1140,19 @@ function EditProfileModal({ profile, onClose, onSaved }) {
   }, [])
 
   function toggleGenre(name) {
-    setSelectedGenres(prev =>
-      prev.includes(name) ? prev.filter(g => g !== name) : [...prev, name]
-    )
+    setSelectedGenres(prev => {
+      if (prev.includes(name)) return prev.filter(g => g !== name)
+      if (prev.length >= MAX_GENRES) return prev
+      return [...prev, name]
+    })
   }
 
   function toggleMood(name) {
-    setSelectedMoods(prev =>
-      prev.includes(name) ? prev.filter(m => m !== name) : [...prev, name]
-    )
+    setSelectedMoods(prev => {
+      if (prev.includes(name)) return prev.filter(m => m !== name)
+      if (prev.length >= MAX_MOODS) return prev
+      return [...prev, name]
+    })
   }
 
   async function handleAvatarChange(e) {
@@ -1148,7 +1197,7 @@ function EditProfileModal({ profile, onClose, onSaved }) {
       onSaved({
         username: data.username,
         bio: data.bio,
-        avatar_url: data.avatar_url,
+        avatar_url: avatarPreview ?? data.avatar_url,
         is_private: data.is_private,
         music_preferences: newPrefs,
       })
@@ -1229,24 +1278,31 @@ function EditProfileModal({ profile, onClose, onSaved }) {
             <p className="text-sm font-medium text-white">Music Taste</p>
 
             <div>
-              <label className="block text-xs text-gray-400 mb-2">Favorite Genres</label>
+              <label className="block text-xs text-gray-400 mb-2">
+                Favorite Genres <span className="text-gray-600">({selectedGenres.length}/{MAX_GENRES})</span>
+              </label>
 
               {/* Popular genres as quick-pick chips */}
               <div className="flex flex-wrap gap-1.5 mb-2">
-                {POPULAR_GENRES.map(name => (
-                  <button
-                    key={name}
-                    type="button"
-                    onClick={() => toggleGenre(name)}
-                    className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
-                      selectedGenres.includes(name)
-                        ? 'bg-violet-600 text-white'
-                        : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200'
-                    }`}
-                  >
-                    {name}
-                  </button>
-                ))}
+                {POPULAR_GENRES.map(name => {
+                  const selected  = selectedGenres.includes(name)
+                  const atLimit   = !selected && selectedGenres.length >= MAX_GENRES
+                  return (
+                    <button
+                      key={name}
+                      type="button"
+                      onClick={() => toggleGenre(name)}
+                      disabled={atLimit}
+                      className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
+                        selected   ? 'bg-violet-600 text-white' :
+                        atLimit    ? 'bg-gray-800 text-gray-600 cursor-not-allowed' :
+                                     'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200'
+                      }`}
+                    >
+                      {name}
+                    </button>
+                  )
+                })}
               </div>
 
               {/* Selected non-popular genres */}
@@ -1308,22 +1364,29 @@ function EditProfileModal({ profile, onClose, onSaved }) {
             </div>
 
             <div>
-              <label className="block text-xs text-gray-400 mb-2">Vibes</label>
+              <label className="block text-xs text-gray-400 mb-2">
+                Vibes <span className="text-gray-600">({selectedMoods.length}/{MAX_MOODS})</span>
+              </label>
               <div className="flex flex-wrap gap-1.5">
-                {MOOD_OPTIONS.map(m => (
-                  <button
-                    key={m}
-                    type="button"
-                    onClick={() => toggleMood(m)}
-                    className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
-                      selectedMoods.includes(m)
-                        ? 'bg-pink-700/80 text-pink-100'
-                        : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200'
-                    }`}
-                  >
-                    {m}
-                  </button>
-                ))}
+                {MOOD_OPTIONS.map(m => {
+                  const selected = selectedMoods.includes(m)
+                  const atLimit  = !selected && selectedMoods.length >= MAX_MOODS
+                  return (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => toggleMood(m)}
+                      disabled={atLimit}
+                      className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
+                        selected  ? 'bg-pink-700/80 text-pink-100' :
+                        atLimit   ? 'bg-gray-800 text-gray-600 cursor-not-allowed' :
+                                    'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200'
+                      }`}
+                    >
+                      {m}
+                    </button>
+                  )
+                })}
               </div>
             </div>
 

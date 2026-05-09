@@ -46,12 +46,15 @@ async def _get_client_token() -> str:
         return _cc_cache["token"]
     if not SPOTIFY_CLIENT_ID or not SPOTIFY_CLIENT_SECRET:
         raise HTTPException(status_code=503, detail="Spotify credentials not configured")
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            "https://accounts.spotify.com/api/token",
-            data={"grant_type": "client_credentials"},
-            auth=(SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET),
-        )
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                "https://accounts.spotify.com/api/token",
+                data={"grant_type": "client_credentials"},
+                auth=(SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET),
+            )
+    except httpx.HTTPError:
+        raise HTTPException(status_code=503, detail="Spotify unavailable")
     if resp.status_code != 200:
         raise HTTPException(status_code=503, detail="Spotify client auth failed")
     data = resp.json()
@@ -89,7 +92,7 @@ async def _get_valid_token(user: models.User, db: Session) -> str:
         raise HTTPException(status_code=401, detail="Spotify account not connected")
 
     if user.spotify_token_expires_at and datetime.utcnow() >= user.spotify_token_expires_at:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(
                 "https://accounts.spotify.com/api/token",
                 data={
@@ -236,7 +239,7 @@ async def spotify_callback(
         return _err("user_not_found")
 
     # Exchange authorization code for tokens
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=10.0) as client:
         token_resp = await client.post(
             "https://accounts.spotify.com/api/token",
             data={
@@ -257,7 +260,7 @@ async def spotify_callback(
     expires_in    = token_data.get("expires_in", 3600)
 
     # Fetch Spotify user profile
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=10.0) as client:
         profile_resp = await client.get(
             "https://api.spotify.com/v1/me",
             headers=_spotify_headers(access_token),
@@ -316,7 +319,7 @@ async def spotify_me(
 ):
     """Fetch the current user's Spotify profile."""
     token = await _get_valid_token(current_user, db)
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=10.0) as client:
         resp = await client.get("https://api.spotify.com/v1/me", headers=_spotify_headers(token))
     if resp.status_code != 200:
         raise HTTPException(status_code=502, detail="Failed to fetch Spotify profile")
@@ -332,7 +335,7 @@ async def spotify_playlists(
     token = await _get_valid_token(current_user, db)
     playlists = []
     url = "https://api.spotify.com/v1/me/playlists?limit=50"
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=10.0) as client:
         while url:
             resp = await client.get(url, headers=_spotify_headers(token))
             if resp.status_code != 200:
@@ -368,7 +371,7 @@ async def spotify_playlist_tracks(
     tracks = []
     url = f"https://api.spotify.com/v1/playlists/{playlist_id}/items?limit=100"
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=10.0) as client:
         while url:
             resp = await client.get(url, headers=_spotify_headers(token))
             if resp.status_code != 200:
@@ -411,6 +414,74 @@ async def spotify_playlist_tracks(
     return tracks
 
 
+@router.post("/import-playlist-as-list")
+async def import_playlist_as_list(
+    body: dict = Body(...),
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Create a Tunelog list from a Spotify playlist, linking any tracks already in Tunelog."""
+    playlist_id = body.get("playlist_id")
+    if not playlist_id:
+        raise HTTPException(status_code=400, detail="playlist_id is required")
+
+    token = await _get_valid_token(current_user, db)
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        meta_resp = await client.get(
+            f"https://api.spotify.com/v1/playlists/{playlist_id}?fields=name,description,images",
+            headers=_spotify_headers(token),
+        )
+        if meta_resp.status_code != 200:
+            raise HTTPException(status_code=502, detail="Failed to fetch playlist from Spotify")
+        meta = meta_resp.json()
+
+        tracks_data = []
+        url = f"https://api.spotify.com/v1/playlists/{playlist_id}/items?limit=100"
+        while url:
+            resp = await client.get(url, headers=_spotify_headers(token))
+            if resp.status_code != 200:
+                break
+            data = resp.json()
+            for item in data.get("items", []):
+                track = item.get("item") or item.get("track")
+                if track and track.get("id") and track.get("type") == "track":
+                    tracks_data.append(track["id"])
+            url = data.get("next")
+
+    # Match tracks already imported into Tunelog by spotify_id
+    matched_songs = (
+        db.query(models.Song)
+        .filter(models.Song.spotify_id.in_(tracks_data))
+        .all()
+    ) if tracks_data else []
+    song_order = {sid: i for i, sid in enumerate(tracks_data)}
+    matched_songs.sort(key=lambda s: song_order.get(s.spotify_id, 9999))
+
+    images = meta.get("images") or []
+    list_obj = models.List(
+        user_id=current_user.id,
+        name=meta.get("name", "Spotify Playlist"),
+        description=(meta.get("description") or "").strip() or f"Imported from Spotify",
+        list_type="custom",
+        is_public=True,
+        cover_url=images[0]["url"] if images else None,
+    )
+    db.add(list_obj)
+    db.flush()
+
+    for song in matched_songs:
+        db.add(models.ListItem(list_id=list_obj.id, song_id=song.id))
+
+    db.commit()
+    return {
+        "list_id":      list_obj.id,
+        "list_name":    list_obj.name,
+        "tracks_total": len(tracks_data),
+        "tracks_added": len(matched_songs),
+    }
+
+
 @router.post("/import-track")
 async def import_track(
     body: dict = Body(...),
@@ -433,7 +504,7 @@ async def import_track(
 
     token = await _get_valid_token(current_user, db)
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=10.0) as client:
         # Fetch track metadata
         track_resp = await client.get(
             f"https://api.spotify.com/v1/tracks/{spotify_track_id}",
@@ -567,7 +638,7 @@ async def refresh_audio_features(
         raise HTTPException(status_code=400, detail="Song has no Spotify ID")
 
     token = await _get_valid_token(current_user, db)
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=10.0) as client:
         resp = await client.get(
             f"https://api.spotify.com/v1/audio-features/{song.spotify_id}",
             headers=_spotify_headers(token),
@@ -830,7 +901,7 @@ async def backfill_metadata(
 
     if artists_with_id and token:
         sp_artist_data: dict[str, dict] = {}
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=10.0) as client:
             for i in range(0, len(artists_with_id), 50):
                 batch = ",".join(a.spotify_id for a in artists_with_id[i:i+50])
                 resp = await client.get(
@@ -859,7 +930,7 @@ async def backfill_metadata(
 
     # ── 1b. Artists WITHOUT spotify_id — search Spotify by name ──────────────
     if artists_without_id and token:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=10.0) as client:
             for artist in artists_without_id:
                 resp = await client.get(
                     "https://api.spotify.com/v1/search",
@@ -915,7 +986,7 @@ async def backfill_metadata(
 
     if albums_missing_date and token:
         sp_album_data: dict[str, dict] = {}
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=10.0) as client:
             for i in range(0, len(albums_missing_date), 20):
                 batch = ",".join(a.spotify_id for a in albums_missing_date[i:i+20])
                 resp = await client.get(
@@ -968,12 +1039,15 @@ async def spotify_catalog_search(
 ):
     """Search Spotify's full catalog for tracks, albums, and artists."""
     token = await _get_client_token()
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(
-            "https://api.spotify.com/v1/search",
-            params={"q": q, "type": "track,album,artist", "limit": 8},
-            headers=_spotify_headers(token),
-        )
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            resp = await client.get(
+                "https://api.spotify.com/v1/search",
+                params={"q": q, "type": "track,album,artist", "limit": 8},
+                headers=_spotify_headers(token),
+            )
+    except (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.ConnectError):
+        raise HTTPException(status_code=503, detail="Spotify unavailable")
     if resp.status_code != 200:
         raise HTTPException(status_code=502, detail="Spotify search failed")
     raw = resp.json()
@@ -1075,7 +1149,7 @@ async def import_album(
 
     token = await _get_client_token()
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=10.0) as client:
         # Full album (includes tracks with up to 50 items)
         album_resp = await client.get(
             f"https://api.spotify.com/v1/albums/{spotify_album_id}",
@@ -1109,7 +1183,7 @@ async def import_album(
     # Fetch full artist for image + genres (new artist, or existing one missing either)
     sp_art_full = None
     if sp_artist.get("id") and (not artist or not artist.image_url or not artist.genres):
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=10.0) as client:
             art_resp = await client.get(
                 f"https://api.spotify.com/v1/artists/{sp_artist['id']}",
                 headers=_spotify_headers(token),
@@ -1158,7 +1232,7 @@ async def import_album(
     features_map: dict = {}
     if track_ids:
         # Batch endpoint allows up to 100 ids
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=10.0) as client:
             for i in range(0, len(track_ids), 100):
                 batch = track_ids[i:i+100]
                 feat_resp = await client.get(
@@ -1237,7 +1311,7 @@ async def import_artist(
 
     token = await _get_client_token()
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=10.0) as client:
         art_resp = await client.get(
             f"https://api.spotify.com/v1/artists/{spotify_artist_id}",
             headers=_spotify_headers(token),
@@ -1296,7 +1370,7 @@ async def import_artist(
             continue
 
         # Fetch full album for tracks
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=10.0) as client:
             full_resp = await client.get(
                 f"https://api.spotify.com/v1/albums/{sp_alb['id']}",
                 headers=_spotify_headers(token),
@@ -1323,7 +1397,7 @@ async def import_artist(
         track_ids = [t["id"] for t in sp_tracks if t and t.get("id")]
         features_map: dict = {}
         if track_ids:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=10.0) as client:
                 feat_resp = await client.get(
                     "https://api.spotify.com/v1/audio-features",
                     params={"ids": ",".join(track_ids[:100])},

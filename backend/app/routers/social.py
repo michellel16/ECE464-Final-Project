@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Body
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
 
 from .. import models
@@ -28,6 +28,7 @@ def get_feed(
     one_month_ago = datetime.utcnow() - timedelta(days=30)
     activities = (
         db.query(models.Activity)
+        .options(joinedload(models.Activity.user))
         .filter(
             models.Activity.user_id.in_(following_ids),
             models.Activity.created_at >= one_month_ago,
@@ -137,6 +138,54 @@ def mark_read(
     rec.is_read = True
     db.commit()
     return {"message": "Marked as read"}
+
+
+@router.post("/reviews/{review_id}/like")
+def toggle_review_like(
+    review_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    review = db.query(models.Review).filter_by(id=review_id).first()
+    if not review:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Review not found")
+
+    existing = db.query(models.ReviewLike).filter_by(
+        user_id=current_user.id, review_id=review_id
+    ).first()
+
+    if existing:
+        db.delete(existing)
+        db.commit()
+        count = db.query(func.count(models.ReviewLike.user_id)).filter_by(review_id=review_id).scalar() or 0
+        return {"liked": False, "count": count}
+
+    db.add(models.ReviewLike(user_id=current_user.id, review_id=review_id))
+    if review.user_id != current_user.id:
+        db.add(models.Notification(
+            user_id=review.user_id,
+            type="review_like",
+            from_user_id=current_user.id,
+            entity_type="review",
+            entity_id=review_id,
+        ))
+    db.commit()
+    count = db.query(func.count(models.ReviewLike.user_id)).filter_by(review_id=review_id).scalar() or 0
+    return {"liked": True, "count": count}
+
+
+@router.get("/reviews/{review_id}/like-status")
+def review_like_status(
+    review_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    liked = db.query(models.ReviewLike).filter_by(
+        user_id=current_user.id, review_id=review_id
+    ).first() is not None
+    count = db.query(func.count(models.ReviewLike.user_id)).filter_by(review_id=review_id).scalar() or 0
+    return {"liked": liked, "count": count}
 
 
 @router.post("/recommendations/read-all")

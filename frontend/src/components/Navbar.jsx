@@ -22,10 +22,10 @@ export default function Navbar() {
   const [menuOpen, setMenu]     = useState(false)
   const [showHistory, setShowHistory] = useState(false)
   const [history, setHistory]   = useState(loadHistory)
-  const [unreadCount, setUnreadCount] = useState(0)
-  const [bellOpen, setBellOpen]       = useState(false)
-  const [bellRecs, setBellRecs]       = useState([])
-  const [bellLoading, setBellLoading] = useState(false)
+  const [unreadCount, setUnreadCount]   = useState(0)
+  const [bellOpen, setBellOpen]         = useState(false)
+  const [notifications, setNotifications] = useState([])
+  const [bellLoading, setBellLoading]   = useState(false)
   const menuRef   = useRef(null)
   const searchRef = useRef(null)
   const bellRef   = useRef(null)
@@ -41,10 +41,10 @@ export default function Navbar() {
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
-  // Fetch unread recommendation count
+  // Fetch unread notification count
   useEffect(() => {
     if (!user) { setUnreadCount(0); return }
-    axios.get('/api/social/recommendations/unread-count')
+    axios.get('/api/notifications/unread-count')
       .then(r => setUnreadCount(r.data.count))
       .catch(() => {})
   }, [user])
@@ -54,10 +54,10 @@ export default function Navbar() {
     setBellOpen(true)
     setBellLoading(true)
     try {
-      const { data } = await axios.get('/api/social/recommendations')
-      setBellRecs(data.slice(0, 6))
+      const { data } = await axios.get('/api/notifications/')
+      setNotifications(data.slice(0, 10))
       if (unreadCount > 0) {
-        await axios.post('/api/social/recommendations/read-all')
+        await axios.post('/api/notifications/mark-all-read')
         setUnreadCount(0)
       }
     } catch {}
@@ -175,7 +175,6 @@ export default function Navbar() {
         {/* Nav links */}
         <div className="hidden md:flex items-center gap-5">
           {navLink('/discover', 'Discover')}
-          {navLink('/charts', 'Charts')}
           {user && navLink('/lists', 'My Lists')}
           {user && navLink('/stats', 'Stats')}
         </div>
@@ -201,51 +200,18 @@ export default function Navbar() {
 
             {bellOpen && (
               <div className="absolute right-0 mt-2 w-80 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl overflow-hidden z-50">
-                <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
-                  <span className="text-sm font-semibold text-white">Recommendations</span>
-                  <Link
-                    to={`/users/${user.username}`}
-                    onClick={() => setBellOpen(false)}
-                    className="text-xs text-violet-400 hover:text-violet-300 transition-colors"
-                  >
-                    View all
-                  </Link>
+                <div className="px-4 py-3 border-b border-gray-800">
+                  <span className="text-sm font-semibold text-white">Notifications</span>
                 </div>
                 {bellLoading ? (
                   <div className="flex items-center justify-center py-8">
                     <div className="w-5 h-5 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
                   </div>
-                ) : bellRecs.length === 0 ? (
-                  <p className="text-gray-500 text-sm text-center py-8 px-4">No recommendations yet.</p>
+                ) : notifications.length === 0 ? (
+                  <p className="text-gray-500 text-sm text-center py-8 px-4">No notifications yet.</p>
                 ) : (
-                  <div className="divide-y divide-gray-800/60 max-h-72 overflow-y-auto">
-                    {bellRecs.map(rec => {
-                      const item = rec.song ?? rec.album
-                      const href = item ? `/${rec.song ? 'songs' : 'albums'}/${item.id}` : null
-                      return (
-                        <Link
-                          key={rec.id}
-                          to={href ?? '#'}
-                          onClick={() => setBellOpen(false)}
-                          className="flex items-center gap-3 px-4 py-3 hover:bg-gray-800 transition-colors"
-                        >
-                          {item?.cover_url ? (
-                            <img src={item.cover_url} alt="" className="w-9 h-9 rounded shrink-0 object-cover" />
-                          ) : (
-                            <div className="w-9 h-9 rounded bg-gray-800 flex items-center justify-center text-gray-500 shrink-0 text-sm">
-                              {rec.song ? '♪' : '💿'}
-                            </div>
-                          )}
-                          <div className="min-w-0 flex-1">
-                            <p className="text-white text-xs font-medium truncate">{item?.title ?? '—'}</p>
-                            <p className="text-gray-500 text-xs truncate">
-                              from <span className="text-violet-400">{rec.sender_username}</span>
-                            </p>
-                            {rec.note && <p className="text-gray-600 text-xs truncate italic">"{rec.note}"</p>}
-                          </div>
-                        </Link>
-                      )
-                    })}
+                  <div className="divide-y divide-gray-800/60 max-h-80 overflow-y-auto">
+                    {notifications.map(n => <NotifRow key={n.id} n={n} onClose={() => setBellOpen(false)} />)}
                   </div>
                 )}
               </div>
@@ -309,6 +275,58 @@ export default function Navbar() {
       </div>
     </nav>
   )
+}
+
+function NotifRow({ n, onClose }) {
+  const ICONS = {
+    new_follower:   '👤',
+    follow_request: '🔔',
+    review_like:    '❤️',
+    recommendation: '🎵',
+  }
+
+  function label() {
+    const who = n.from_user?.username ?? 'Someone'
+    if (n.type === 'new_follower')   return <><span className="text-violet-400">{who}</span> started following you</>
+    if (n.type === 'follow_request') return <><span className="text-violet-400">{who}</span> wants to follow you</>
+    if (n.type === 'review_like')    return <><span className="text-violet-400">{who}</span> liked your review</>
+    if (n.type === 'recommendation') {
+      const item = n.song ?? n.album
+      return <><span className="text-violet-400">{who}</span> recommended {item ? <span className="text-white">{item.title}</span> : 'something'}</>
+    }
+    return who
+  }
+
+  function href() {
+    if (n.type === 'recommendation') {
+      const item = n.song ?? n.album
+      if (item) return `/${n.song ? 'songs' : 'albums'}/${item.id}`
+    }
+    if (n.from_user?.username) return `/users/${n.from_user.username}`
+    return null
+  }
+
+  const item    = n.song ?? n.album
+  const coverUrl = item?.cover_url ?? null
+  const target  = href()
+  const content = (
+    <div className={`flex items-center gap-3 px-4 py-3 transition-colors ${n.is_read ? 'opacity-70' : ''} hover:bg-gray-800`}>
+      <div className="w-9 h-9 rounded-full bg-gray-800 flex items-center justify-center text-sm shrink-0 overflow-hidden">
+        {coverUrl
+          ? <img src={coverUrl} alt="" className="w-full h-full object-cover" />
+          : <span>{ICONS[n.type] ?? '🔔'}</span>}
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-gray-300 text-xs leading-snug">{label()}</p>
+        {n.note && <p className="text-gray-600 text-xs italic truncate mt-0.5">"{n.note}"</p>}
+        {!n.is_read && <span className="inline-block w-1.5 h-1.5 rounded-full bg-violet-500 ml-1 align-middle" />}
+      </div>
+    </div>
+  )
+
+  return target
+    ? <Link to={target} onClick={onClose} className="block">{content}</Link>
+    : <div>{content}</div>
 }
 
 export function Avatar({ username, avatarUrl = null, size = 8, className = '' }) {

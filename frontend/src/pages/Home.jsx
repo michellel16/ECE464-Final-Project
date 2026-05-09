@@ -10,7 +10,6 @@ export default function Home() {
   const [albums, setAlbums]                     = useState([])
   const [artists, setArtists]                   = useState([])
   const [songs, setSongs]                       = useState([])
-  const [newReleases, setNewReleases]           = useState([])
   const [feed, setFeed]                         = useState([])
   const [recommended, setRecommended]           = useState([])
   const [recommendedArtists, setRecArtists]     = useState([])
@@ -18,21 +17,17 @@ export default function Home() {
   const [forYouSongs, setForYouSongs]           = useState([])
   const [forYouSource, setForYouSource]         = useState(null)
   const [suggested, setSuggested]               = useState([])
-  const [loading, setLoading]                   = useState(true)
+  const [albumsLoading, setAlbumsLoading]       = useState(true)
+  const [artistsLoading, setArtistsLoading]     = useState(true)
+  const [songsLoading, setSongsLoading]         = useState(true)
 
   useEffect(() => {
-    setLoading(true)
-    Promise.all([
-      axios.get('/api/music/albums?limit=12&sort=recently_reviewed'),
-      axios.get('/api/music/artists?limit=12&sort=recently_reviewed'),
-      axios.get('/api/music/songs?limit=6&sort=recently_reviewed'),
-      axios.get('/api/music/albums?limit=6&sort=new_releases'),
-    ]).then(([albumsRes, artistsRes, songsRes, newReleasesRes]) => {
-      setAlbums(albumsRes.data)
-      setArtists(artistsRes.data)
-      setSongs(songsRes.data)
-      setNewReleases(newReleasesRes.data)
-    }).finally(() => setLoading(false))
+    axios.get('/api/music/albums?limit=12&sort=top_rated')
+      .then(r => setAlbums(r.data)).catch(() => {}).finally(() => setAlbumsLoading(false))
+    axios.get('/api/music/artists?limit=12&sort=top_rated')
+      .then(r => setArtists(r.data)).catch(() => {}).finally(() => setArtistsLoading(false))
+    axios.get('/api/music/songs?limit=6&sort=top_rated')
+      .then(r => setSongs(r.data)).catch(() => {}).finally(() => setSongsLoading(false))
 
     if (user) {
       axios.get(`/api/users/${user.username}/activity?limit=15`)
@@ -54,7 +49,19 @@ export default function Home() {
     }
   }, [user])
 
-  if (loading) return <PageLoader />
+  // Re-fetch recommended artists/songs when the user returns to this tab
+  useEffect(() => {
+    if (!user) return
+    function refreshRecommended() {
+      if (document.visibilityState === 'visible') {
+        axios.get('/api/music/recommended?song_limit=8')
+          .then(r => { setRecommended(r.data.songs); setRecArtists(r.data.artists) })
+          .catch(() => {})
+      }
+    }
+    document.addEventListener('visibilitychange', refreshRecommended)
+    return () => document.removeEventListener('visibilitychange', refreshRecommended)
+  }, [user])
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8 space-y-14">
@@ -82,42 +89,44 @@ export default function Home() {
 
       {/* Artists */}
       <section>
-        <SectionHeader title="Recently Reviewed Artists" href="/discover?tab=artists" />
-        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-4">
-          {artists.map(a => <ArtistCard key={a.id} artist={a} />)}
-        </div>
+        <SectionHeader title="Top Rated Artists" href="/discover?tab=artists" />
+        {artistsLoading ? (
+          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-4">
+            {Array.from({ length: 6 }).map((_, i) => <ArtistSkeleton key={i} />)}
+          </div>
+        ) : (
+          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-4">
+            {artists.map(a => <ArtistCard key={a.id} artist={a} />)}
+          </div>
+        )}
       </section>
 
       {/* Albums */}
       <section>
-        <SectionHeader title="Recently Reviewed Albums" href="/discover?tab=albums" />
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
-          {albums.map(a => <AlbumCard key={a.id} album={a} />)}
-        </div>
-      </section>
-
-      {/* New Releases */}
-      {newReleases.length > 0 && (
-        <section>
-          <div className="flex items-center justify-between mb-5">
-            <div>
-              <h2 className="text-xl font-bold text-white">New Releases</h2>
-              <p className="text-gray-500 text-sm mt-0.5">Latest albums added to Tunelog</p>
-            </div>
-            <Link to="/charts" className="text-sm text-violet-400 hover:text-violet-300 transition-colors">Charts →</Link>
-          </div>
+        <SectionHeader title="Top Rated Albums" href="/discover?tab=albums" />
+        {albumsLoading ? (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
-            {newReleases.map(a => <AlbumCard key={a.id} album={a} />)}
+            {Array.from({ length: 6 }).map((_, i) => <AlbumSkeleton key={i} />)}
           </div>
-        </section>
-      )}
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
+            {albums.map(a => <AlbumCard key={a.id} album={a} />)}
+          </div>
+        )}
+      </section>
 
       {/* Songs */}
       <section>
-        <SectionHeader title="Recently Reviewed Songs" href="/discover?tab=songs" />
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {songs.map(s => <SongRow key={s.id} song={s} />)}
-        </div>
+        <SectionHeader title="Top Rated Songs" href="/discover?tab=songs" />
+        {songsLoading ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {Array.from({ length: 4 }).map((_, i) => <SongSkeleton key={i} />)}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {songs.map(s => <SongRow key={s.id} song={s} />)}
+          </div>
+        )}
       </section>
 
       {/* Albums For You — vector-based */}
@@ -281,9 +290,6 @@ function RecommendedArtistCard({ artist }) {
         )}
       </div>
       <p className="text-white font-medium text-sm group-hover:text-violet-400 transition-colors">{artist.name}</p>
-      {artist.reason && (
-        <p className="text-violet-400/70 text-xs mt-0.5 truncate px-1">{artist.reason}</p>
-      )}
     </Link>
   )
 }
@@ -299,9 +305,6 @@ function RecommendedSongRow({ song }) {
       <div className="min-w-0 flex-1">
         <p className="text-white text-sm font-medium truncate group-hover:text-violet-400 transition-colors">{song.title}</p>
         <p className="text-gray-500 text-xs truncate">{song.artist?.name}{song.album ? ` · ${song.album.title}` : ''}</p>
-        {song.reason && (
-          <p className="text-violet-400/70 text-xs truncate mt-0.5">{song.reason}</p>
-        )}
       </div>
       {song.average_rating && (
         <span className="text-yellow-400 text-xs shrink-0">★ {song.average_rating.toFixed(1)}</span>
@@ -461,10 +464,33 @@ function ForYouSongRow({ song }) {
   )
 }
 
-function PageLoader() {
+function ArtistSkeleton() {
   return (
-    <div className="flex items-center justify-center min-h-[60vh]">
-      <div className="w-10 h-10 border-4 border-violet-600 border-t-transparent rounded-full animate-spin" />
+    <div className="block text-center animate-pulse">
+      <div className="aspect-square bg-gray-800 rounded-full mx-auto w-28 sm:w-36 mb-3" />
+      <div className="h-3 bg-gray-800 rounded w-16 mx-auto" />
+    </div>
+  )
+}
+
+function AlbumSkeleton() {
+  return (
+    <div className="animate-pulse">
+      <div className="aspect-square bg-gray-800 rounded-lg mb-2" />
+      <div className="h-3 bg-gray-800 rounded w-3/4 mb-1" />
+      <div className="h-3 bg-gray-800 rounded w-1/2" />
+    </div>
+  )
+}
+
+function SongSkeleton() {
+  return (
+    <div className="card p-3 flex items-center gap-3 animate-pulse">
+      <div className="w-10 h-10 rounded bg-gray-800 shrink-0" />
+      <div className="flex-1 space-y-2">
+        <div className="h-3 bg-gray-800 rounded w-3/4" />
+        <div className="h-3 bg-gray-800 rounded w-1/2" />
+      </div>
     </div>
   )
 }

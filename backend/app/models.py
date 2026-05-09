@@ -262,6 +262,21 @@ class ReviewLike(Base):
     review = relationship("Review", backref="likes")
 
 
+class Notification(Base):
+    __tablename__ = "notifications"
+    id           = Column(Integer, primary_key=True, index=True)
+    user_id      = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    type         = Column(String(50), nullable=False)   # new_follower | follow_request | review_like
+    from_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
+    entity_type  = Column(String(50), nullable=True)
+    entity_id    = Column(Integer,    nullable=True)
+    is_read      = Column(Boolean, default=False, nullable=False)
+    created_at   = Column(DateTime, default=datetime.utcnow)
+
+    user      = relationship("User", foreign_keys=[user_id])
+    from_user = relationship("User", foreign_keys=[from_user_id])
+
+
 class UserRecommendation(Base):
     __tablename__ = "user_recommendations"
     id           = Column(Integer, primary_key=True, index=True)

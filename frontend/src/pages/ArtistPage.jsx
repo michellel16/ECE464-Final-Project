@@ -1,13 +1,18 @@
 import { useState, useEffect } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import AlbumCard from '../components/AlbumCard'
+import { useAuth } from '../contexts/AuthContext'
 
 export default function ArtistPage() {
   const { id } = useParams()
+  const { user } = useAuth()
+  const navigate = useNavigate()
   const [artist, setArtist] = useState(null)
   const [albums, setAlbums] = useState([])
   const [loading, setLoading] = useState(true)
+  const [deleting, setDeleting] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
   useEffect(() => {
     Promise.all([
@@ -18,6 +23,18 @@ export default function ArtistPage() {
       setAlbums(albRes.data)
     }).finally(() => setLoading(false))
   }, [id])
+
+  async function handleDelete() {
+    if (!confirmDelete) { setConfirmDelete(true); return }
+    setDeleting(true)
+    try {
+      await axios.delete(`/api/music/artists/${id}`)
+      navigate('/discover')
+    } catch {
+      setDeleting(false)
+      setConfirmDelete(false)
+    }
+  }
 
   if (loading) return <Loader />
   if (!artist) return <NotFound />
@@ -33,8 +50,23 @@ export default function ArtistPage() {
             <div className="w-full h-full flex items-center justify-center text-5xl">🎤</div>
           )}
         </div>
-        <div>
-          <h1 className="text-4xl font-extrabold text-white">{artist.name}</h1>
+        <div className="flex-1">
+          <div className="flex items-start justify-between gap-4">
+            <h1 className="text-4xl font-extrabold text-white">{artist.name}</h1>
+            {user && (
+              <button
+                onClick={handleDelete}
+                disabled={deleting}
+                className={`shrink-0 text-xs px-3 py-1.5 rounded-lg border transition-colors disabled:opacity-50 ${
+                  confirmDelete
+                    ? 'border-red-500 text-red-400 bg-red-950/40 hover:bg-red-900/60'
+                    : 'border-gray-700 text-gray-500 hover:border-red-600 hover:text-red-400'
+                }`}
+              >
+                {deleting ? 'Deleting…' : confirmDelete ? 'Confirm delete' : 'Delete artist'}
+              </button>
+            )}
+          </div>
           <div className="flex flex-wrap gap-2 mt-2">
             {artist.genres?.map(g => (
               <span key={g.id} className="text-xs text-violet-300 bg-violet-900/40 px-2.5 py-1 rounded-full">

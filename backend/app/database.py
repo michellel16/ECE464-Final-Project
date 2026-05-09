@@ -1,6 +1,6 @@
 import os
 from dotenv import load_dotenv
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 from sqlalchemy.pool import NullPool
 
@@ -27,15 +27,26 @@ if not DATABASE_URL:
 # stays within Supabase's free-tier limit of ~15 session connections.
 _using_supabase_pooler = ":6543" in DATABASE_URL
 
+_CONNECT_ARGS = {"options": "-c statement_timeout=0"}
+
 if _using_supabase_pooler:
-    engine = create_engine(DATABASE_URL, poolclass=NullPool)
+    engine = create_engine(DATABASE_URL, poolclass=NullPool, connect_args=_CONNECT_ARGS)
 else:
     engine = create_engine(
         DATABASE_URL,
         pool_pre_ping=True,
         pool_size=3,
         max_overflow=7,   # hard cap: 10 total, well within Supabase's 15-connection limit
+        connect_args=_CONNECT_ARGS,
     )
+
+
+@event.listens_for(engine, "connect")
+def _disable_statement_timeout(dbapi_conn, _record):
+    cursor = dbapi_conn.cursor()
+    cursor.execute("SET statement_timeout = 0")
+    cursor.close()
+
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

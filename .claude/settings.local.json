@@ -16,7 +16,12 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(git push:*)",
-      "Bash(Find C:\\\\Users\\\\miche\\\\PycharmProjects\\\\ECE464-Final-Project\\\\alembic\\\\versions *)"
+      "Bash(Find C:\\\\Users\\\\miche\\\\PycharmProjects\\\\ECE464-Final-Project\\\\alembic\\\\versions *)",
+      "Bash(curl -s http://127.0.0.1:8000/api/charts/all-genres-debug)",
+      "Bash(curl *)",
+      "Bash(timeout 30 cat \"C:\\\\Users\\\\miche\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-miche-PycharmProjects-ECE464-Final-Project\\\\ab1e6fbc-6340-4245-8b31-7349f8331ca8\\\\tasks\\\\b721q582b.output\")",
+      "Bash(del \"C:\\\\Users\\\\miche\\\\PycharmProjects\\\\ECE464-Final-Project\\\\backend\\\\app\\\\storage.py\")",
+      "Bash(del \"C:\\\\Users\\\\miche\\\\PycharmProjects\\\\ECE464-Final-Project\\\\alembic\\\\versions\\\\0012_backdrop.py\")"
     ]
   }
 }

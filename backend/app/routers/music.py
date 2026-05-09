@@ -1,8 +1,8 @@
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Body
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from typing import List, Optional
 
 from .. import models, schemas
@@ -226,8 +226,70 @@ def get_genres(db: Session = Depends(get_db)):
 # ── Artists ───────────────────────────────────────────────────────────────────
 
 @router.get("/artists")
-def list_artists(skip: int = 0, limit: int = 50, sort: Optional[str] = None, db: Session = Depends(get_db)):
-    if sort == 'recently_reviewed':
+def list_artists(
+    skip: int = 0, limit: int = 50,
+    sort: Optional[str] = None,
+    genre_id: Optional[int] = None,
+    include_total: bool = False,
+    db: Session = Depends(get_db),
+):
+    opts = [joinedload(models.Artist.genres)]
+
+    def _gf(q):
+        if genre_id:
+            artist_ids_in_genre = (
+                db.query(models.artist_genre.c.artist_id)
+                .filter(models.artist_genre.c.genre_id == genre_id)
+                .scalar_subquery()
+            )
+            q = q.filter(models.Artist.id.in_(artist_ids_in_genre))
+        return q
+
+    total_count = None
+
+    if sort == 'trending':
+        cutoff = datetime.utcnow() - timedelta(days=14)
+        all_stats = (
+            db.query(
+                models.Album.artist_id,
+                func.count(models.Review.id).label('total_count'),
+                func.avg(models.Review.rating).label('avg_rating'),
+            )
+            .join(models.Review, models.Review.album_id == models.Album.id)
+            .group_by(models.Album.artist_id)
+            .subquery()
+        )
+        recent_stats = (
+            db.query(
+                models.Album.artist_id,
+                func.count(models.Review.id).label('recent_count'),
+                func.avg(models.Review.rating).label('recent_avg'),
+            )
+            .join(models.Review, models.Review.album_id == models.Album.id)
+            .filter(models.Review.created_at >= cutoff)
+            .group_by(models.Album.artist_id)
+            .subquery()
+        )
+        score = (
+            func.coalesce(recent_stats.c.recent_count, 0)
+            * func.coalesce(recent_stats.c.recent_avg, all_stats.c.avg_rating, 3.0)
+            + 0.1 * all_stats.c.total_count * func.coalesce(all_stats.c.avg_rating, 3.0)
+        )
+        if include_total:
+            total_count = (
+                _gf(db.query(func.count(models.Artist.id)))
+                .join(all_stats, all_stats.c.artist_id == models.Artist.id)
+                .scalar()
+            )
+        artists = (
+            _gf(db.query(models.Artist).options(*opts))
+            .join(all_stats, all_stats.c.artist_id == models.Artist.id)
+            .outerjoin(recent_stats, recent_stats.c.artist_id == models.Artist.id)
+            .order_by(score.desc())
+            .offset(skip).limit(limit).all()
+        )
+
+    elif sort == 'recently_reviewed':
         album_latest = (
             db.query(models.Album.artist_id, func.max(models.Review.created_at).label('latest'))
             .join(models.Review, models.Review.album_id == models.Album.id)
@@ -241,25 +303,48 @@ def list_artists(skip: int = 0, limit: int = 50, sort: Optional[str] = None, db:
             .subquery()
         )
         ordered_ids = [row[0] for row in (
-            db.query(models.Artist.id)
+            _gf(db.query(models.Artist.id))
             .outerjoin(album_latest, album_latest.c.artist_id == models.Artist.id)
             .outerjoin(song_latest, song_latest.c.artist_id == models.Artist.id)
             .order_by(func.greatest(album_latest.c.latest, song_latest.c.latest).desc().nullslast())
-            .limit(limit).all()
+            .offset(skip).limit(limit).all()
         )]
         id_map = {a.id: a for a in (
-            db.query(models.Artist)
-            .options(joinedload(models.Artist.genres))
-            .filter(models.Artist.id.in_(ordered_ids))
-            .all()
+            db.query(models.Artist).options(*opts).filter(models.Artist.id.in_(ordered_ids)).all()
         )}
         artists = [id_map[i] for i in ordered_ids if i in id_map]
-    else:
+
+    elif sort == 'top_rated':
+        avg_sub = (
+            db.query(
+                models.Album.artist_id,
+                func.avg(models.Review.rating).label('avg_rating'),
+                func.count(models.Review.id).label('review_count'),
+            )
+            .join(models.Review, models.Review.album_id == models.Album.id)
+            .group_by(models.Album.artist_id)
+            .subquery()
+        )
         artists = (
-            db.query(models.Artist)
-            .options(joinedload(models.Artist.genres))
+            _gf(db.query(models.Artist).options(*opts))
+            .outerjoin(avg_sub, avg_sub.c.artist_id == models.Artist.id)
+            .order_by(avg_sub.c.avg_rating.desc().nullslast(), avg_sub.c.review_count.desc().nullslast())
             .offset(skip).limit(limit).all()
         )
+
+    elif sort == 'alpha':
+        artists = (
+            _gf(db.query(models.Artist).options(*opts))
+            .order_by(models.Artist.name)
+            .offset(skip).limit(limit).all()
+        )
+
+    else:
+        artists = (
+            _gf(db.query(models.Artist).options(*opts))
+            .offset(skip).limit(limit).all()
+        )
+
     artist_ids = [a.id for a in artists]
     album_counts = dict(
         db.query(models.Album.artist_id, func.count(models.Album.id))
@@ -267,7 +352,7 @@ def list_artists(skip: int = 0, limit: int = 50, sort: Optional[str] = None, db:
         .group_by(models.Album.artist_id)
         .all()
     ) if artist_ids else {}
-    return [
+    items = [
         {
             "id": a.id, "name": a.name, "bio": a.bio,
             "image_url": a.image_url, "formed_year": a.formed_year,
@@ -277,6 +362,11 @@ def list_artists(skip: int = 0, limit: int = 50, sort: Optional[str] = None, db:
         }
         for a in artists
     ]
+    if include_total:
+        if total_count is None:
+            total_count = _gf(db.query(func.count(models.Artist.id))).scalar()
+        return {"total": total_count, "items": items}
+    return items
 
 
 @router.get("/recommended")
@@ -294,13 +384,17 @@ def recommended_combined(
     # Track original affinity genres (from actual listening) before preference boost
     affinity_genre_ids: set[int] = set(liked_genre_counts.keys())
 
-    # Boost genre affinities from user's stated music preferences
+    # Boost genre affinities from user's stated music preferences (one batch query)
     pref_genre_ids: set[int] = set()
     try:
         prefs = json.loads(current_user.music_preferences or '{}')
-        for gname in prefs.get('genres', []):
-            genre = db.query(models.Genre).filter(models.Genre.name.ilike(gname)).first()
-            if genre:
+        pref_names = [g.lower() for g in prefs.get('genres', []) if g]
+        if pref_names:
+            for genre in (
+                db.query(models.Genre)
+                .filter(func.lower(models.Genre.name).in_(pref_names))
+                .all()
+            ):
                 liked_genre_counts[genre.id] = liked_genre_counts.get(genre.id, 0.0) + 2.5
                 pref_genre_ids.add(genre.id)
     except Exception:
@@ -311,9 +405,6 @@ def recommended_combined(
 
     liked_genre_ids = set(liked_genre_counts)
     interacted_ids = set(artist_scores.keys())
-
-    # Track which "Similar to X" reasons have been used to avoid repeating the same artist name
-    used_similar_refs: set[str] = set()
 
     # ── Artists ──────────────────────────────────────────────────────────────
     artist_candidates = (
@@ -326,19 +417,12 @@ def recommended_combined(
     def _artist_score(a: models.Artist) -> float:
         return sum(liked_genre_counts[g.id] for g in a.genres if g.id in liked_genre_ids)
 
-    def _artist_reason(a: models.Artist) -> str:
+    def _artist_reason(a: models.Artist) -> str | None:
         best = max((g for g in a.genres if g.id in liked_genre_ids),
                    key=lambda g: liked_genre_counts[g.id], default=None)
-        if not best:
-            return "You might enjoy this"
-        if best.id in pref_only_genre_ids:
+        if best and best.id in pref_only_genre_ids:
             return f"Matches your {best.name} interest"
-        similar = genre_to_liked_artists.get(best.id, [])
-        for name in similar:
-            if name not in used_similar_refs:
-                used_similar_refs.add(name)
-                return f"Similar to {name}"
-        return f"Based on your love of {best.name}"
+        return None
 
     sorted_artists = [a for a in sorted(artist_candidates, key=_artist_score, reverse=True) if _artist_score(a) > 0]
     top_artists = _diverse_pick(
@@ -349,38 +433,26 @@ def recommended_combined(
     )
 
     # ── Songs ─────────────────────────────────────────────────────────────────
-    seen_song_ids: set[int] = {
-        row[0] for row in
-        db.query(models.Review.song_id)
-        .filter(models.Review.user_id == uid, models.Review.song_id.isnot(None))
-        .all()
-    } | {
-        row[0] for row in
-        db.query(models.UserSongStatus.song_id)
-        .filter(models.UserSongStatus.user_id == uid)
-        .all()
-    }
-    interacted_album_ids: set[int] = {
-        row[0] for row in
-        db.query(models.UserAlbumStatus.album_id)
-        .filter(models.UserAlbumStatus.user_id == uid)
-        .all()
-    }
-    if interacted_album_ids:
-        seen_song_ids |= {
-            row[0] for row in
-            db.query(models.Song.id)
-            .filter(models.Song.album_id.in_(interacted_album_ids))
-            .all()
-        }
-    list_ids = [r[0] for r in db.query(models.List.id).filter_by(user_id=uid).all()]
-    if list_ids:
-        seen_song_ids |= {
-            row[0] for row in
-            db.query(models.ListItem.song_id)
-            .filter(models.ListItem.list_id.in_(list_ids), models.ListItem.song_id.isnot(None))
-            .all()
-        }
+    # Build seen_song_ids in one SQL UNION instead of 5 round-trips
+    from sqlalchemy import text as _text
+    seen_rows = db.execute(_text("""
+        SELECT song_id FROM reviews
+          WHERE user_id = :uid AND song_id IS NOT NULL
+        UNION
+        SELECT song_id FROM user_song_statuses WHERE user_id = :uid
+        UNION
+        SELECT s.id FROM songs s WHERE s.album_id IN (
+            SELECT album_id FROM reviews
+              WHERE user_id = :uid AND album_id IS NOT NULL
+            UNION
+            SELECT album_id FROM user_album_statuses WHERE user_id = :uid
+        )
+        UNION
+        SELECT li.song_id FROM list_items li
+          JOIN lists l ON l.id = li.list_id
+         WHERE l.user_id = :uid AND li.song_id IS NOT NULL
+    """), {"uid": uid}).fetchall()
+    seen_song_ids: set[int] = {r[0] for r in seen_rows}
 
     avg_ratings: dict[int, float] = {
         sid: float(avg)
@@ -390,15 +462,31 @@ def recommended_combined(
         .all()
     }
 
-    song_candidates = (
-        db.query(models.Song)
-        .options(
-            joinedload(models.Song.artist).joinedload(models.Artist.genres),
-            joinedload(models.Song.album),
+    # Only load songs from artists in liked genres (not every song in the DB)
+    liked_genre_artist_ids: set[int] = set()
+    if liked_genre_ids:
+        liked_genre_artist_ids = {
+            r[0] for r in
+            db.query(models.artist_genre.c.artist_id)
+            .filter(models.artist_genre.c.genre_id.in_(liked_genre_ids))
+            .all()
+        }
+    liked_genre_artist_ids |= liked_artist_ids  # also include directly-interacted artists
+
+    if liked_genre_artist_ids:
+        q = (
+            db.query(models.Song)
+            .options(
+                joinedload(models.Song.artist).joinedload(models.Artist.genres),
+                joinedload(models.Song.album),
+            )
+            .filter(models.Song.artist_id.in_(liked_genre_artist_ids))
         )
-        .filter(~models.Song.id.in_(seen_song_ids) if seen_song_ids else True)
-        .all()
-    )
+        if seen_song_ids:
+            q = q.filter(~models.Song.id.in_(seen_song_ids))
+        song_candidates = q.all()
+    else:
+        song_candidates = []
 
     def _song_score(s: models.Song) -> float:
         score = sum(
@@ -410,24 +498,17 @@ def recommended_combined(
         score += avg_ratings.get(s.id, 0.0)
         return score
 
-    def _song_reason(s: models.Song) -> str:
+    def _song_reason(s: models.Song) -> str | None:
         if artist_scores.get(s.artist_id, 0.0) >= 1.0:
             return f"Because you like {s.artist.name}"
         best = max(
             (g for g in (s.artist.genres if s.artist else []) if g.id in liked_genre_ids),
             key=lambda g: liked_genre_counts[g.id], default=None,
         )
-        if best:
-            if best.id in pref_only_genre_ids:
-                return f"Matches your {best.name} interest"
-            similar = genre_to_liked_artists.get(best.id, [])
-            for name in similar:
-                if name not in used_similar_refs:
-                    used_similar_refs.add(name)
-                    return f"Similar to {name}"
-            return f"Based on your love of {best.name}"
+        if best and best.id in pref_only_genre_ids:
+            return f"Matches your {best.name} interest"
         r = avg_ratings.get(s.id)
-        return f"Highly rated · ★ {r:.1f}" if r and r >= 4.0 else "Popular on Tunelog"
+        return f"Highly rated · ★ {r:.1f}" if r and r >= 4.0 else None
 
     top_songs = _diverse_pick(
         sorted(song_candidates, key=_song_score, reverse=True), song_limit,
@@ -483,18 +564,13 @@ def recommended_artists(
     def _score(artist: models.Artist) -> float:
         return sum(liked_genre_counts[g.id] for g in artist.genres if g.id in liked_genre_ids)
 
-    def _reason(artist: models.Artist) -> str:
+    def _reason(artist: models.Artist) -> str | None:
         best_genre = max(
             (g for g in artist.genres if g.id in liked_genre_ids),
             key=lambda g: liked_genre_counts[g.id],
             default=None,
         )
-        if best_genre:
-            similar = genre_to_liked_artists.get(best_genre.id, [])
-            if similar:
-                return f"Similar to {similar[0]}"
-            return f"Based on your love of {best_genre.name}"
-        return "You might enjoy this"
+        return None
 
     sorted_candidates = [a for a in sorted(candidates, key=_score, reverse=True) if _score(a) > 0]
     top = _diverse_pick(
@@ -559,11 +635,107 @@ def get_artist_albums(artist_id: int, db: Session = Depends(get_db)):
     ]
 
 
+@router.delete("/artists/{artist_id}")
+def delete_artist(
+    artist_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    artist = db.query(models.Artist).filter(models.Artist.id == artist_id).first()
+    if not artist:
+        raise HTTPException(status_code=404, detail="Artist not found")
+    name = artist.name
+    db.delete(artist)
+    db.commit()
+    return {"message": f"Deleted artist '{name}' and all associated albums and songs"}
+
+
 # ── Albums ────────────────────────────────────────────────────────────────────
 
 @router.get("/albums")
-def list_albums(skip: int = 0, limit: int = 30, sort: Optional[str] = None, db: Session = Depends(get_db)):
-    if sort == 'recently_reviewed':
+def list_albums(
+    skip: int = 0, limit: int = 50,
+    sort: Optional[str] = None,
+    genre_id: Optional[int] = None,
+    year: Optional[int] = None,
+    decade: Optional[int] = None,
+    include_total: bool = False,
+    db: Session = Depends(get_db),
+):
+    opts = [
+        joinedload(models.Album.artist).joinedload(models.Artist.genres),
+        joinedload(models.Album.genres),
+    ]
+
+    def _gf(q):
+        if genre_id:
+            album_ids_in_genre = (
+                db.query(models.album_genre.c.album_id)
+                .filter(models.album_genre.c.genre_id == genre_id)
+                .scalar_subquery()
+            )
+            artist_ids_in_genre = (
+                db.query(models.artist_genre.c.artist_id)
+                .filter(models.artist_genre.c.genre_id == genre_id)
+                .scalar_subquery()
+            )
+            q = q.filter(or_(
+                models.Album.id.in_(album_ids_in_genre),
+                models.Album.artist_id.in_(artist_ids_in_genre),
+            ))
+        if year:
+            q = q.filter(models.Album.release_date.like(f"{year}%"))
+        elif decade:
+            q = q.filter(
+                models.Album.release_date >= str(decade),
+                models.Album.release_date < str(decade + 10),
+            )
+        return q
+
+    total_count = None
+
+    if sort == 'trending':
+        cutoff = datetime.utcnow() - timedelta(days=14)
+        all_stats = (
+            db.query(
+                models.Review.album_id,
+                func.count(models.Review.id).label('total_count'),
+                func.avg(models.Review.rating).label('avg_rating'),
+            )
+            .filter(models.Review.album_id.isnot(None))
+            .group_by(models.Review.album_id)
+            .subquery()
+        )
+        recent_stats = (
+            db.query(
+                models.Review.album_id,
+                func.count(models.Review.id).label('recent_count'),
+                func.avg(models.Review.rating).label('recent_avg'),
+            )
+            .filter(models.Review.album_id.isnot(None), models.Review.created_at >= cutoff)
+            .group_by(models.Review.album_id)
+            .subquery()
+        )
+        score = (
+            func.coalesce(recent_stats.c.recent_count, 0)
+            * func.coalesce(recent_stats.c.recent_avg, all_stats.c.avg_rating, 3.0)
+            + 0.1 * all_stats.c.total_count * func.coalesce(all_stats.c.avg_rating, 3.0)
+        )
+        if include_total:
+            total_count = (
+                _gf(db.query(func.count(models.Album.id)))
+                .join(all_stats, all_stats.c.album_id == models.Album.id)
+                .scalar()
+            )
+        albums = (
+            _gf(db.query(models.Album).options(*opts))
+            .join(all_stats, all_stats.c.album_id == models.Album.id)
+            .outerjoin(recent_stats, recent_stats.c.album_id == models.Album.id)
+            .order_by(score.desc())
+            .offset(skip).limit(limit).all()
+        )
+
+    elif sort == 'recently_reviewed':
         latest_review = (
             db.query(models.Review.album_id, func.max(models.Review.created_at).label('latest'))
             .filter(models.Review.album_id.isnot(None))
@@ -571,47 +743,80 @@ def list_albums(skip: int = 0, limit: int = 30, sort: Optional[str] = None, db: 
             .subquery()
         )
         ordered_ids = [row[0] for row in (
-            db.query(models.Album.id)
+            _gf(db.query(models.Album.id))
             .outerjoin(latest_review, latest_review.c.album_id == models.Album.id)
             .order_by(latest_review.c.latest.desc().nullslast())
-            .limit(limit).all()
+            .offset(skip).limit(limit).all()
         )]
         id_map = {al.id: al for al in (
-            db.query(models.Album)
-            .options(joinedload(models.Album.artist), joinedload(models.Album.genres))
-            .filter(models.Album.id.in_(ordered_ids))
-            .all()
+            db.query(models.Album).options(*opts).filter(models.Album.id.in_(ordered_ids)).all()
         )}
         albums = [id_map[i] for i in ordered_ids if i in id_map]
-    elif sort == 'new_releases':
-        albums = (
-            db.query(models.Album)
-            .options(joinedload(models.Album.artist), joinedload(models.Album.genres))
-            .filter(models.Album.release_date.isnot(None))
-            .order_by(models.Album.release_date.desc())
-            .offset(skip).limit(limit)
-            .all()
+
+    elif sort == 'top_rated':
+        avg_sub = (
+            db.query(
+                models.Review.album_id,
+                func.avg(models.Review.rating).label('avg_rating'),
+                func.count(models.Review.id).label('review_count'),
+            )
+            .filter(models.Review.album_id.isnot(None))
+            .group_by(models.Review.album_id)
+            .subquery()
         )
-    else:
+        if include_total:
+            total_count = (
+                _gf(db.query(func.count(models.Album.id)))
+                .join(avg_sub, avg_sub.c.album_id == models.Album.id)
+                .scalar()
+            )
         albums = (
-            db.query(models.Album)
-            .options(joinedload(models.Album.artist), joinedload(models.Album.genres))
+            _gf(db.query(models.Album).options(*opts))
+            .join(avg_sub, avg_sub.c.album_id == models.Album.id)
+            .order_by(avg_sub.c.avg_rating.desc(), avg_sub.c.review_count.desc())
             .offset(skip).limit(limit).all()
         )
+
+    elif sort == 'new_releases':
+        albums = (
+            _gf(db.query(models.Album).options(*opts))
+            .filter(models.Album.release_date.isnot(None))
+            .order_by(models.Album.release_date.desc())
+            .offset(skip).limit(limit).all()
+        )
+
+    elif sort == 'alpha':
+        albums = (
+            _gf(db.query(models.Album).options(*opts))
+            .order_by(models.Album.title)
+            .offset(skip).limit(limit).all()
+        )
+
+    else:
+        albums = _gf(db.query(models.Album).options(*opts)).offset(skip).limit(limit).all()
+
     album_ids = [al.id for al in albums]
     avg_map, count_map, _ = _batch_album_stats(db, album_ids)
-    return [
+    items = [
         {
             "id": al.id, "title": al.title, "artist_id": al.artist_id,
             "artist": {"id": al.artist.id, "name": al.artist.name, "image_url": al.artist.image_url} if al.artist else None,
             "release_date": al.release_date, "cover_url": al.cover_url,
             "description": al.description,
-            "genres": [{"id": g.id, "name": g.name} for g in al.genres],
+            "genres": (
+                [{"id": g.id, "name": g.name} for g in al.genres]
+                or ([{"id": g.id, "name": g.name} for g in al.artist.genres] if al.artist else [])
+            ),
             "average_rating": avg_map.get(al.id),
             "review_count": count_map.get(al.id, 0),
         }
         for al in albums
     ]
+    if include_total:
+        if total_count is None:
+            total_count = _gf(db.query(func.count(models.Album.id))).scalar()
+        return {"total": total_count, "items": items}
+    return items
 
 
 @router.get("/albums/{album_id}")
@@ -666,8 +871,69 @@ async def get_album(album_id: int, db: Session = Depends(get_db)):
 # ── Songs ─────────────────────────────────────────────────────────────────────
 
 @router.get("/songs")
-def list_songs(skip: int = 0, limit: int = 50, sort: Optional[str] = None, db: Session = Depends(get_db)):
-    if sort == 'recently_reviewed':
+def list_songs(
+    skip: int = 0, limit: int = 50,
+    sort: Optional[str] = None,
+    genre_id: Optional[int] = None,
+    include_total: bool = False,
+    db: Session = Depends(get_db),
+):
+    opts = [joinedload(models.Song.artist), joinedload(models.Song.album)]
+
+    def _gf(q):
+        if genre_id:
+            artist_ids_in_genre = (
+                db.query(models.artist_genre.c.artist_id)
+                .filter(models.artist_genre.c.genre_id == genre_id)
+                .scalar_subquery()
+            )
+            q = q.filter(models.Song.artist_id.in_(artist_ids_in_genre))
+        return q
+
+    total_count = None
+
+    if sort == 'trending':
+        cutoff = datetime.utcnow() - timedelta(days=14)
+        all_stats = (
+            db.query(
+                models.Review.song_id,
+                func.count(models.Review.id).label('total_count'),
+                func.avg(models.Review.rating).label('avg_rating'),
+            )
+            .filter(models.Review.song_id.isnot(None))
+            .group_by(models.Review.song_id)
+            .subquery()
+        )
+        recent_stats = (
+            db.query(
+                models.Review.song_id,
+                func.count(models.Review.id).label('recent_count'),
+                func.avg(models.Review.rating).label('recent_avg'),
+            )
+            .filter(models.Review.song_id.isnot(None), models.Review.created_at >= cutoff)
+            .group_by(models.Review.song_id)
+            .subquery()
+        )
+        score = (
+            func.coalesce(recent_stats.c.recent_count, 0)
+            * func.coalesce(recent_stats.c.recent_avg, all_stats.c.avg_rating, 3.0)
+            + 0.1 * all_stats.c.total_count * func.coalesce(all_stats.c.avg_rating, 3.0)
+        )
+        if include_total:
+            total_count = (
+                _gf(db.query(func.count(models.Song.id)))
+                .join(all_stats, all_stats.c.song_id == models.Song.id)
+                .scalar()
+            )
+        songs = (
+            _gf(db.query(models.Song).options(*opts))
+            .join(all_stats, all_stats.c.song_id == models.Song.id)
+            .outerjoin(recent_stats, recent_stats.c.song_id == models.Song.id)
+            .order_by(score.desc())
+            .offset(skip).limit(limit).all()
+        )
+
+    elif sort == 'recently_reviewed':
         latest_review = (
             db.query(models.Review.song_id, func.max(models.Review.created_at).label('latest'))
             .filter(models.Review.song_id.isnot(None))
@@ -675,24 +941,50 @@ def list_songs(skip: int = 0, limit: int = 50, sort: Optional[str] = None, db: S
             .subquery()
         )
         ordered_ids = [row[0] for row in (
-            db.query(models.Song.id)
+            _gf(db.query(models.Song.id))
             .outerjoin(latest_review, latest_review.c.song_id == models.Song.id)
             .order_by(latest_review.c.latest.desc().nullslast())
-            .limit(limit).all()
+            .offset(skip).limit(limit).all()
         )]
         id_map = {s.id: s for s in (
-            db.query(models.Song)
-            .options(joinedload(models.Song.artist), joinedload(models.Song.album))
-            .filter(models.Song.id.in_(ordered_ids))
-            .all()
+            db.query(models.Song).options(*opts).filter(models.Song.id.in_(ordered_ids)).all()
         )}
         songs = [id_map[i] for i in ordered_ids if i in id_map]
-    else:
+
+    elif sort == 'top_rated':
+        avg_sub = (
+            db.query(
+                models.Review.song_id,
+                func.avg(models.Review.rating).label('avg_rating'),
+                func.count(models.Review.id).label('review_count'),
+            )
+            .filter(models.Review.song_id.isnot(None))
+            .group_by(models.Review.song_id)
+            .subquery()
+        )
+        if include_total:
+            total_count = (
+                _gf(db.query(func.count(models.Song.id)))
+                .join(avg_sub, avg_sub.c.song_id == models.Song.id)
+                .scalar()
+            )
         songs = (
-            db.query(models.Song)
-            .options(joinedload(models.Song.artist), joinedload(models.Song.album))
+            _gf(db.query(models.Song).options(*opts))
+            .join(avg_sub, avg_sub.c.song_id == models.Song.id)
+            .order_by(avg_sub.c.avg_rating.desc(), avg_sub.c.review_count.desc())
             .offset(skip).limit(limit).all()
         )
+
+    elif sort == 'alpha':
+        songs = (
+            _gf(db.query(models.Song).options(*opts))
+            .order_by(models.Song.title)
+            .offset(skip).limit(limit).all()
+        )
+
+    else:
+        songs = _gf(db.query(models.Song).options(*opts)).offset(skip).limit(limit).all()
+
     song_ids = [s.id for s in songs]
     avg_map: dict[int, float] = {}
     if song_ids:
@@ -705,7 +997,7 @@ def list_songs(skip: int = 0, limit: int = 50, sort: Optional[str] = None, db: S
                 .all()
             )
         }
-    return [
+    items = [
         {
             "id": s.id, "title": s.title, "artist_id": s.artist_id,
             "artist": {"id": s.artist.id, "name": s.artist.name} if s.artist else None,
@@ -716,6 +1008,11 @@ def list_songs(skip: int = 0, limit: int = 50, sort: Optional[str] = None, db: S
         }
         for s in songs
     ]
+    if include_total:
+        if total_count is None:
+            total_count = _gf(db.query(func.count(models.Song.id))).scalar()
+        return {"total": total_count, "items": items}
+    return items
 
 
 @router.get("/songs/recommended")
@@ -796,24 +1093,12 @@ def recommended_songs(
         score += avg_ratings.get(song.id, 0.0)
         return score
 
-    def _reason(song: models.Song) -> str:
+    def _reason(song: models.Song) -> str | None:
         a_score = artist_scores.get(song.artist_id, 0.0)
         if a_score >= 1.0:
             return f"Because you like {song.artist.name}"
-        best_genre = max(
-            (g for g in (song.artist.genres if song.artist else []) if g.id in liked_genre_ids),
-            key=lambda g: liked_genre_counts[g.id],
-            default=None,
-        )
-        if best_genre:
-            similar = genre_to_liked_artists.get(best_genre.id, [])
-            if similar:
-                return f"Similar to {similar[0]}"
-            return f"Based on your love of {best_genre.name}"
         r = avg_ratings.get(song.id)
-        if r and r >= 4.0:
-            return f"Highly rated · ★ {r:.1f}"
-        return "Popular on Tunelog"
+        return f"Highly rated · ★ {r:.1f}" if r and r >= 4.0 else None
 
     sorted_candidates = sorted(candidates, key=_score, reverse=True)
     top = _diverse_pick(

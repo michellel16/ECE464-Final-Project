@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from typing import Optional
 
 from .. import models, schemas
@@ -15,20 +16,20 @@ class SyncRequest(BaseModel):
 
 
 @router.post("/sync", response_model=schemas.User)
-def sync_user(
+async def sync_user(
     body: SyncRequest,
     authorization: str = Header(...),
     db: Session = Depends(get_db),
 ):
     token = authorization.removeprefix("Bearer ")
-    payload = verify_supabase_token(token)
+    payload = await verify_supabase_token(token)
     supabase_id = payload["sub"]
     email = payload.get("email", "")
 
     user = db.query(models.User).filter(models.User.supabase_id == supabase_id).first()
     if user:
-        user.follower_count = len(user.followers)
-        user.following_count = len(user.following)
+        user.follower_count = db.query(func.count(models.UserFollow.follower_id)).filter_by(followed_id=user.id).scalar() or 0
+        user.following_count = db.query(func.count(models.UserFollow.followed_id)).filter_by(follower_id=user.id).scalar() or 0
         return user
 
     # First time — create profile
@@ -52,7 +53,10 @@ def sync_user(
 
 
 @router.get("/me", response_model=schemas.User)
-def get_me(current_user: models.User = Depends(get_current_user)):
-    current_user.follower_count = len(current_user.followers)
-    current_user.following_count = len(current_user.following)
+def get_me(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    current_user.follower_count = db.query(func.count(models.UserFollow.follower_id)).filter_by(followed_id=current_user.id).scalar() or 0
+    current_user.following_count = db.query(func.count(models.UserFollow.followed_id)).filter_by(follower_id=current_user.id).scalar() or 0
     return current_user

@@ -27,17 +27,18 @@ oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_e
 _jwks_cache: dict | None = None
 
 
-def _get_jwks() -> dict:
+async def _get_jwks() -> dict:
     global _jwks_cache
     if _jwks_cache is None:
-        resp = httpx.get(f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json")
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json")
         _jwks_cache = resp.json()
     return _jwks_cache
 
 
-def verify_supabase_token(token: str) -> dict:
+async def verify_supabase_token(token: str) -> dict:
     try:
-        jwks = _get_jwks()
+        jwks = await _get_jwks()
         header = jwt.get_unverified_header(token)
         kid = header.get("kid")
         alg = header.get("alg", "RS256")
@@ -64,7 +65,7 @@ async def get_current_user(
     token: str = Depends(oauth2_scheme),
     db: Session = Depends(get_db),
 ) -> models.User:
-    payload = verify_supabase_token(token)
+    payload = await verify_supabase_token(token)
     supabase_id: str = payload.get("sub")
     if not supabase_id:
         raise HTTPException(

@@ -15,7 +15,6 @@ When the taste embedding is stale or missing, a background task is enqueued to
 call OpenAI and update the cache — so the next request can use path 1. This
 keeps OpenAI rate limits entirely out of the hot request path.
 """
-import asyncio
 import hashlib
 import json
 import logging
@@ -34,6 +33,19 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/recommendations", tags=["recommendations"])
 
 _MIN_PROFILE_SIZE = 2
+
+# In-process cache: embedding text → vector (stable across requests, cleared on restart)
+_pref_embedding_cache: dict[str, list[float]] = {}
+
+
+async def _fetch_pref_embeddings_bg(texts: list[str]) -> None:
+    """Background: fetch missing preference embeddings one at a time to avoid bursting the rate limit."""
+    from ..embeddings import get_embedding
+    for t in texts:
+        if t not in _pref_embedding_cache:
+            vec = await get_embedding(t)
+            if vec is not None:
+                _pref_embedding_cache[t] = vec
 
 
 # ── Taste-profile helpers ──────────────────────────────────────────────────────
@@ -403,12 +415,18 @@ async def my_recommendations(
         + ([pref_free_text] if pref_free_text else [])
     )
 
-    # ── Fetch preference cluster embeddings (cached in-process) ───────────────
+    # ── Fetch preference cluster embeddings (cache-only in hot path) ──────────
+    # Never call OpenAI here — use whatever is already cached, and queue a
+    # background task to warm any missing entries for the next request.
     pref_vecs: list[list[float]] = []
-    if interest_texts:
-        from ..embeddings import get_embedding as _ge
-        raw = await asyncio.gather(*[_ge(t) for t in interest_texts])
-        pref_vecs = [v for v in raw if v is not None]
+    missing_pref_texts: list[str] = []
+    for t in interest_texts:
+        if t in _pref_embedding_cache:
+            pref_vecs.append(_pref_embedding_cache[t])
+        else:
+            missing_pref_texts.append(t)
+    if missing_pref_texts:
+        background_tasks.add_task(_fetch_pref_embeddings_bg, missing_pref_texts)
 
     # ── Helper: run vector queries for each cluster then round-robin merge ─────
     def _exec_multi(all_vecs: list, src: str):
