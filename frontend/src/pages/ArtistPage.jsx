@@ -25,7 +25,7 @@ export default function ArtistPage() {
     <div className="max-w-6xl mx-auto px-4 py-8">
       {/* Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6 mb-10">
-        <div className="w-36 h-36 rounded-full overflow-hidden bg-gray-800 shrink-0 ring-4 ring-violet-700/40">
+        <div className="w-36 h-36 rounded-full overflow-hidden bg-[#1a1a2e] shrink-0 ring-2 ring-violet-600/50">
           {artist.image_url ? (
             <img src={artist.image_url} alt={artist.name} className="w-full h-full object-cover" />
           ) : (
@@ -33,15 +33,15 @@ export default function ArtistPage() {
           )}
         </div>
         <div className="flex-1">
-          <h1 className="text-4xl font-extrabold text-white">{artist.name}</h1>
+          <h1 className="text-4xl font-extrabold text-white font-display">{artist.name}</h1>
           <div className="flex flex-wrap gap-2 mt-2">
             {artist.genres?.map(g => (
-              <span key={g.id} className="text-xs text-violet-300 bg-violet-900/40 px-2.5 py-1 rounded-full">
+              <span key={g.id} className="text-xs text-violet-200 bg-violet-900/40 border border-violet-700/50 px-3 py-1 rounded">
                 {g.name}
               </span>
             ))}
           </div>
-          <div className="flex gap-4 mt-3 text-sm text-gray-400">
+          <div className="flex gap-4 mt-3 text-xs text-gray-300">
             {artist.country && <span>{artist.country}</span>}
             {artist.formed_year && <span>Est. {artist.formed_year}</span>}
             <span>{albums.length} album{albums.length !== 1 ? 's' : ''}</span>
@@ -50,7 +50,7 @@ export default function ArtistPage() {
       </div>
 
       {artist.bio && (
-        <div className="card p-5 mb-8 text-gray-300 text-sm leading-relaxed max-w-3xl">
+        <div className="card p-5 mb-8 text-gray-200 text-sm leading-relaxed max-w-3xl">
           {artist.bio}
         </div>
       )}

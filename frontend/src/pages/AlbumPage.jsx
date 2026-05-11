@@ -114,7 +114,7 @@ export default function AlbumPage() {
     <div className="max-w-5xl mx-auto px-4 py-8">
       {/* Hero */}
       <div className="flex flex-col sm:flex-row gap-6 mb-8">
-        <div className="w-48 h-48 rounded-xl overflow-hidden bg-gray-800 shrink-0 shadow-2xl shadow-violet-900/30">
+        <div className="w-48 h-48 rounded overflow-hidden bg-[#1a1a2e] shrink-0 shadow-2xl shadow-violet-900/40 ring-1 ring-white/25">
           {album.cover_url ? (
             <img src={album.cover_url} alt={album.title} className="w-full h-full object-cover" />
           ) : (
@@ -123,14 +123,14 @@ export default function AlbumPage() {
         </div>
         <div className="flex-1 space-y-2">
           <p className="text-gray-400 text-sm uppercase tracking-wider">Album</p>
-          <h1 className="text-3xl sm:text-4xl font-extrabold text-white leading-tight">{album.title}</h1>
+          <h1 className="text-3xl sm:text-4xl font-extrabold text-white leading-tight font-display">{album.title}</h1>
           <Link to={`/artists/${album.artist_id}`} className="text-violet-400 hover:text-violet-300 font-medium text-lg transition-colors">
             {album.artist?.name}
           </Link>
-          <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-400">
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-300">
             {year && <span>{year}</span>}
             {album.genres?.map(g => (
-              <span key={g.id} className="text-violet-300 bg-violet-900/30 px-2 py-0.5 rounded-full text-xs">{g.name}</span>
+              <span key={g.id} className="text-violet-200 bg-violet-900/40 px-3 py-1 rounded text-xs border border-violet-800/40">{g.name}</span>
             ))}
           </div>
 
@@ -138,7 +138,7 @@ export default function AlbumPage() {
           {album.average_rating && (
             <div className="flex items-center gap-3 pt-1">
               <StarRating value={album.average_rating} readonly />
-              <span className="text-gray-400 text-sm">{album.review_count} review{album.review_count !== 1 ? 's' : ''}</span>
+              <span className="text-gray-300 text-xs">{album.review_count} review{album.review_count !== 1 ? 's' : ''}</span>
             </div>
           )}
 
@@ -149,10 +149,10 @@ export default function AlbumPage() {
                 <button
                   key={key}
                   onClick={() => setStatus(key)}
-                  className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors border ${
+                  className={`px-3 py-1 rounded text-xs font-medium transition-colors border ${
                     myStatus === key
                       ? 'bg-violet-600 border-violet-600 text-white'
-                      : 'border-gray-700 text-gray-400 hover:border-violet-600 hover:text-violet-400'
+                      : 'border-[#2a2a45] text-gray-300 hover:border-violet-600 hover:text-violet-300'
                   }`}
                 >
                   {emoji} {label}
@@ -160,30 +160,30 @@ export default function AlbumPage() {
               ))}
               <button
                 onClick={() => setShowForm(!showForm)}
-                className="px-4 py-1.5 rounded-full text-sm font-medium border border-pink-700 text-pink-400 hover:bg-pink-700/20 transition-colors"
+                className="px-3 py-1 rounded text-xs font-medium border border-pink-700/60 text-pink-300 hover:bg-pink-700/20 transition-colors"
               >
                 ✏ {myReview ? 'Edit Review' : 'Write Review'}
               </button>
               <button
                 onClick={() => setShowRecommend(true)}
-                className="px-4 py-1.5 rounded-full text-sm font-medium border border-gray-700 text-gray-400 hover:border-violet-600 hover:text-violet-400 transition-colors"
+                className="px-3 py-1 rounded text-xs font-medium border border-[#2a2a45] text-gray-300 hover:border-violet-600 hover:text-violet-300 transition-colors"
               >
                 ↗ Recommend
               </button>
               <div className="relative">
                 <button
                   onClick={() => setAddingList(!addingList)}
-                  className="px-4 py-1.5 rounded-full text-sm font-medium border border-gray-700 text-gray-400 hover:border-violet-600 hover:text-violet-400 transition-colors"
+                  className="px-3 py-1 rounded text-xs font-medium border border-[#2a2a45] text-gray-300 hover:border-violet-600 hover:text-violet-300 transition-colors"
                 >
                   + Add to List
                 </button>
                 {addingList && myLists.length > 0 && (
-                  <div className="absolute left-0 top-full mt-1 w-52 bg-gray-900 border border-gray-700 rounded-xl shadow-xl py-1 z-10">
+                  <div className="absolute left-0 top-full mt-1 w-52 bg-[#111127] border border-[#252540] rounded shadow-xl py-1 z-10">
                     {myLists.map(l => (
                       <button
                         key={l.id}
                         onClick={() => addToList(l.id)}
-                        className="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-white"
+                        className="w-full text-left px-4 py-2 text-xs text-gray-300 hover:bg-[#1a1a2e] hover:text-white"
                       >
                         {l.name}
                       </button>

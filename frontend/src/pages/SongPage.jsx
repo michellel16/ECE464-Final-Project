@@ -78,7 +78,7 @@ export default function SongPage() {
     <div className="max-w-3xl mx-auto px-4 py-8">
       {/* Header */}
       <div className="flex gap-5 mb-6 items-start">
-        <div className="w-24 h-24 rounded-lg overflow-hidden bg-gray-800 shrink-0 shadow-lg">
+        <div className="w-24 h-24 rounded overflow-hidden bg-[#1a1a2e] shrink-0 shadow-lg ring-1 ring-white/25">
           {song.album?.cover_url ? (
             <img src={song.album.cover_url} alt={song.album.title} className="w-full h-full object-cover" />
           ) : (
@@ -87,19 +87,19 @@ export default function SongPage() {
         </div>
         <div>
           <p className="text-gray-400 text-xs uppercase tracking-wider mb-1">Song</p>
-          <h1 className="text-3xl font-extrabold text-white">{song.title}</h1>
+          <h1 className="text-3xl font-extrabold text-white font-display">{song.title}</h1>
           <Link to={`/artists/${song.artist_id}`} className="text-violet-400 hover:text-violet-300 font-medium transition-colors">
             {song.artist?.name}
           </Link>
           {song.album && (
-            <div className="text-gray-500 text-sm mt-0.5">
+            <div className="text-gray-400 text-xs mt-0.5">
               from{' '}
-              <Link to={`/albums/${song.album_id}`} className="text-gray-300 hover:text-white transition-colors">
+              <Link to={`/albums/${song.album_id}`} className="text-gray-200 hover:text-white transition-colors">
                 {song.album.title}
               </Link>
             </div>
           )}
-          <div className="flex items-center gap-4 mt-2 text-sm text-gray-400">
+          <div className="flex items-center gap-4 mt-2 text-xs text-gray-300">
             {song.track_number && <span>Track {song.track_number}</span>}
             {song.duration_seconds && <span>{formatDuration(song.duration_seconds)}</span>}
             {song.spotify_id && (
@@ -116,7 +116,7 @@ export default function SongPage() {
           {song.average_rating && (
             <div className="flex items-center gap-2 mt-2">
               <StarRating value={song.average_rating} readonly />
-              <span className="text-gray-400 text-sm">{song.review_count} review{song.review_count !== 1 ? 's' : ''}</span>
+              <span className="text-gray-400 text-xs">{song.review_count} review{song.review_count !== 1 ? 's' : ''}</span>
             </div>
           )}
         </div>
@@ -176,10 +176,10 @@ export default function SongPage() {
             <button
               key={key}
               onClick={() => setStatus(key)}
-              className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors border ${
+              className={`px-4 py-1.5 rounded text-sm font-medium transition-colors border ${
                 myStatus === key
                   ? 'bg-violet-600 border-violet-600 text-white'
-                  : 'border-gray-700 text-gray-400 hover:border-violet-600 hover:text-violet-400'
+                  : 'border-[#2a2a45] text-gray-300 hover:border-violet-600 hover:text-violet-300'
               }`}
             >
               {label}
@@ -187,19 +187,19 @@ export default function SongPage() {
           ))}
           <button
             onClick={() => setShowListModal(true)}
-            className="px-4 py-1.5 rounded-full text-sm font-medium border border-gray-700 text-gray-400 hover:border-violet-600 hover:text-violet-400 transition-colors"
+            className="px-4 py-1.5 rounded text-sm font-medium border border-[#2a2a45] text-gray-300 hover:border-violet-600 hover:text-violet-300 transition-colors"
           >
             + Add to List
           </button>
           <button
             onClick={() => setShowForm(!showForm)}
-            className="px-4 py-1.5 rounded-full text-sm font-medium border border-pink-700 text-pink-400 hover:bg-pink-700/20 transition-colors"
+            className="px-4 py-1.5 rounded text-sm font-medium border border-pink-700/60 text-pink-300 hover:bg-pink-700/20 transition-colors"
           >
             ✏ {myReview ? 'Edit Review' : 'Write Review'}
           </button>
           <button
             onClick={() => setShowRecommend(true)}
-            className="px-4 py-1.5 rounded-full text-sm font-medium border border-gray-700 text-gray-400 hover:border-violet-600 hover:text-violet-400 transition-colors"
+            className="px-4 py-1.5 rounded text-sm font-medium border border-[#2a2a45] text-gray-300 hover:border-violet-600 hover:text-violet-300 transition-colors"
           >
             ↗ Recommend
           </button>

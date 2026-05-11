@@ -12,30 +12,32 @@ const LIST_TYPE_LABELS = {
 }
 
 const ALBUM_SORTS  = [
-  { key: 'top_rated',         label: 'Top Rated'        },
-  { key: 'trending',          label: 'Trending'         },
-  { key: 'recently_reviewed', label: 'Recently Reviewed'},
-  { key: 'new_releases',      label: 'Newest'           },
-  { key: 'alpha',             label: 'A–Z'              },
+  { key: 'top_rated',    label: 'Top Rated' },
+  { key: 'trending',     label: 'Trending'  },
+  { key: 'new_releases', label: 'Newest'    },
+  { key: 'alpha',        label: 'A–Z'       },
 ]
 const ARTIST_SORTS = [
   { key: 'top_rated', label: 'Top Rated' },
   { key: 'trending',  label: 'Trending'  },
+  { key: 'newest',    label: 'Newest'    },
   { key: 'alpha',     label: 'A–Z'       },
 ]
 const SONG_SORTS   = [
   { key: 'top_rated', label: 'Top Rated' },
   { key: 'trending',  label: 'Trending'  },
+  { key: 'newest',    label: 'Newest'    },
   { key: 'alpha',     label: 'A–Z'       },
 ]
 const LIST_SORTS   = [
   { key: 'top',      label: 'Top Rated' },
   { key: 'trending', label: 'Trending'  },
+  { key: 'newest',   label: 'Newest'    },
 ]
 
 const DECADES = Array.from({ length: 7 }, (_, i) => 2020 - i * 10)
 
-const PAGE_SIZES = { albums: 12, artists: 10, songs: 20, lists: 12 }
+const PAGE_SIZES = { albums: 24, artists: 24, songs: 24, lists: 24 }
 
 function pageNumbers(current, total) {
   if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1)
@@ -75,6 +77,10 @@ export default function Discover() {
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const searchTimer = useRef(null)
 
+  const [genreSearch, setGenreSearch]     = useState('')
+  const [showGenreList, setShowGenreList] = useState(false)
+  const genreRef = useRef(null)
+
   const [genres, setGenres] = useState([])
   const [years, setYears]   = useState([])
 
@@ -107,6 +113,17 @@ export default function Discover() {
     }, 350)
     return () => clearTimeout(searchTimer.current)
   }, [albumSearch])
+
+  // Close genre dropdown on outside click
+  useEffect(() => {
+    function handleMouseDown(e) {
+      if (genreRef.current && !genreRef.current.contains(e.target)) {
+        setShowGenreList(false)
+      }
+    }
+    document.addEventListener('mousedown', handleMouseDown)
+    return () => document.removeEventListener('mousedown', handleMouseDown)
+  }, [])
 
   // Load filter option data once
   useEffect(() => {
@@ -171,6 +188,8 @@ export default function Discover() {
     setYear('')
     setDecade('')
     setAlbumSearch('')
+    setGenreSearch('')
+    setShowGenreList(false)
     setAlbumPage(1); setArtistPage(1); setSongPage(1); setListPage(1)
   }
 
@@ -183,6 +202,7 @@ export default function Discover() {
 
   function clearFilters() {
     setGenreId(''); setYear(''); setDecade(''); setAlbumSearch('')
+    setGenreSearch(''); setShowGenreList(false)
     setAlbumPage(1); setArtistPage(1); setSongPage(1)
   }
 
@@ -219,25 +239,25 @@ export default function Discover() {
     <div className="max-w-7xl mx-auto px-4 py-8 space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold text-white mb-1">Discover</h1>
-        <p className="text-gray-400">Browse and filter music on Tunelog</p>
+        <h1 className="text-3xl font-bold text-white mb-1 font-display">Discover</h1>
+        <p className="text-gray-300 text-sm">Browse and filter music on Tunelog</p>
       </div>
 
       {/* Tabs (left) + Sort pills (right) — same row */}
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <div className="flex gap-1 bg-gray-900 rounded-xl p-1">
+        <div className="flex items-center gap-1 bg-gray-900 rounded-xl p-1">
           {['albums', 'artists', 'songs', 'lists'].map(t => (
             <button key={t} onClick={() => switchTab(t)}
-              className={`px-5 py-2 rounded-lg text-sm font-medium transition-colors capitalize ${tab === t ? 'bg-violet-600 text-white' : 'text-gray-400 hover:text-white'}`}>
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium tracking-wide uppercase transition-colors capitalize ${tab === t ? 'bg-violet-600 text-white' : 'text-gray-400 hover:text-white'}`}>
               {t}
             </button>
           ))}
         </div>
 
-        <div className="flex gap-1 bg-gray-900 rounded-xl p-1">
+        <div className="flex items-center gap-1 bg-gray-900 rounded-xl p-1">
           {sortOptions.map(({ key, label }) => (
             <button key={key} onClick={() => setSort(key)}
-              className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${currentSort === key ? 'bg-violet-600 text-white' : 'text-gray-400 hover:text-white'}`}>
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium tracking-wide transition-colors ${currentSort === key ? 'bg-violet-600 text-white' : 'text-gray-400 hover:text-white'}`}>
               {label}
             </button>
           ))}
@@ -257,36 +277,84 @@ export default function Discover() {
                 value={albumSearch}
                 onChange={e => setAlbumSearch(e.target.value)}
                 placeholder="Search albums…"
-                className="input text-sm py-1.5 pl-8 pr-7 w-44"
+                className="input text-xs text-white placeholder-gray-400 py-1.5 pl-8 pr-7 w-44"
               />
               {albumSearch && (
                 <button onClick={() => setAlbumSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 transition-colors text-xs">✕</button>
               )}
             </div>
           )}
-          <select value={genreId} onChange={e => { setGenreId(e.target.value); setAlbumPage(1); setArtistPage(1); setSongPage(1) }}
-            className="input text-sm py-1.5 px-3 min-w-[130px]">
-            <option value="">All genres</option>
-            {genres.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-          </select>
+          <div className="relative" ref={genreRef}>
+            <div
+              className="input py-1.5 px-2 flex items-center gap-1 min-w-[130px] cursor-pointer"
+              onClick={() => { if (!genreId) setShowGenreList(v => !v) }}
+            >
+              {genreId ? (
+                <>
+                  <span className="text-xs text-white flex-1 truncate">
+                    {genres.find(g => String(g.id) === String(genreId))?.name ?? 'Genre'}
+                  </span>
+                  <button
+                    onClick={e => { e.stopPropagation(); setGenreId(''); setGenreSearch(''); setAlbumPage(1); setArtistPage(1); setSongPage(1) }}
+                    className="text-gray-400 hover:text-white transition-colors text-xs shrink-0"
+                  >×</button>
+                </>
+              ) : (
+                <input
+                  type="text"
+                  placeholder="Search genres..."
+                  value={genreSearch}
+                  onChange={e => { setGenreSearch(e.target.value); setShowGenreList(true) }}
+                  onFocus={() => setShowGenreList(true)}
+                  className="bg-transparent border-none text-xs text-white w-full focus:outline-none placeholder-gray-400 [&::placeholder]:text-gray-400"
+                />
+              )}
+            </div>
+            {showGenreList && !genreId && (
+              <div className="absolute top-full mt-1 z-30 left-0 right-0 max-h-48 overflow-y-auto bg-[#111127] border border-[#252540] rounded shadow-xl">
+                {genres
+                  .filter(g => g.name.toLowerCase().includes(genreSearch.toLowerCase()))
+                  .map(g => (
+                    <button
+                      key={g.id}
+                      onClick={() => { setGenreId(String(g.id)); setGenreSearch(''); setShowGenreList(false); setAlbumPage(1); setArtistPage(1); setSongPage(1) }}
+                      className="w-full text-left text-xs text-gray-200 hover:bg-[#1a1a2e] px-3 py-2 transition-colors"
+                    >
+                      {g.name}
+                    </button>
+                  ))
+                }
+                {genres.filter(g => g.name.toLowerCase().includes(genreSearch.toLowerCase())).length === 0 && (
+                  <p className="text-xs text-gray-400 px-3 py-2">No genres found</p>
+                )}
+              </div>
+            )}
+          </div>
 
           {showYearDecade && (
-            <>
-              <select value={year} onChange={e => { setYear(e.target.value); setDecade(''); setAlbumPage(1) }}
-                className="input text-sm py-1.5 px-3 min-w-[110px]">
-                <option value="">Any year</option>
-                {years.map(y => <option key={y} value={y}>{y}</option>)}
-              </select>
-              <select value={decade} onChange={e => { setDecade(e.target.value); setYear(''); setAlbumPage(1) }}
-                className="input text-sm py-1.5 px-3 min-w-[110px]">
-                <option value="">Any decade</option>
-                {DECADES.map(d => <option key={d} value={d}>{d}s</option>)}
-              </select>
-            </>
+            <div className="flex items-center gap-1 input py-1.5 px-2 w-28">
+              <input
+                type="number"
+                min="1950"
+                max="2025"
+                placeholder="Search year..."
+                value={year}
+                onChange={e => {
+                  const v = e.target.value
+                  if (v.length >= 4) { setYear(v); setDecade(''); setAlbumPage(1) }
+                  else setYear(v)
+                }}
+                onBlur={e => { if (e.target.value) { setYear(e.target.value); setDecade(''); setAlbumPage(1) } }}
+                className="bg-transparent border-none text-xs text-white placeholder-gray-400 w-full focus:outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+              />
+              {year && (
+                <button onClick={() => { setYear(''); setDecade(''); setAlbumPage(1) }} className="text-gray-400 hover:text-white transition-colors text-xs shrink-0">×</button>
+              )}
+            </div>
           )}
 
           {hasFilter && (
-            <button onClick={clearFilters} className="text-sm text-gray-400 hover:text-white transition-colors">
+            <button onClick={clearFilters} className="text-xs text-gray-300 hover:text-white transition-colors">
               Clear filters
             </button>
           )}
@@ -350,7 +418,7 @@ export default function Discover() {
               >
                 ← Prev
               </button>
-              <span className="px-4 py-2 text-sm text-gray-400">Page {listPage}</span>
+              <span className="px-4 py-2 text-sm text-gray-300">Page {listPage}</span>
               <button
                 onClick={() => setListPage(p => p + 1)}
                 disabled={lists.length < PAGE_SIZES.lists}
@@ -422,8 +490,8 @@ function ChartAlbumRow({ album, rank }) {
       </div>
       <div className="flex-1 min-w-0">
         <p className="text-white font-medium truncate group-hover:text-violet-400 transition-colors">{album.title}</p>
-        <p className="text-gray-400 text-sm truncate">
-          {album.artist?.name}{year && <span className="text-gray-600"> · {year}</span>}
+        <p className="text-gray-300 text-sm truncate">
+          {album.artist?.name}{year && <span className="text-gray-400"> · {year}</span>}
         </p>
         {album.genres?.length > 0 && (
           <div className="flex gap-1 mt-1 flex-wrap">
@@ -440,10 +508,10 @@ function ChartAlbumRow({ album, rank }) {
               <StarRating value={album.average_rating} readonly size="sm" />
               <span className="text-white font-bold text-sm">{album.average_rating?.toFixed(2)}</span>
             </div>
-            <p className="text-gray-600 text-xs mt-0.5">{album.review_count} review{album.review_count !== 1 ? 's' : ''}</p>
+            <p className="text-gray-400 text-xs mt-0.5">{album.review_count} review{album.review_count !== 1 ? 's' : ''}</p>
           </>
         ) : (
-          <p className="text-gray-600 text-xs">No reviews yet</p>
+          <p className="text-gray-400 text-xs">No reviews yet</p>
         )}
       </div>
     </Link>
@@ -460,7 +528,7 @@ function ArtistCard({ artist }) {
       </div>
       <p className="text-white font-medium text-sm group-hover:text-violet-400 transition-colors">{artist.name}</p>
       {artist.genres?.length > 0 && (
-        <p className="text-gray-500 text-xs mt-0.5 truncate px-2">{artist.genres.slice(0, 2).map(g => g.name).join(' · ')}</p>
+        <p className="text-gray-400 text-xs mt-0.5 truncate px-2">{artist.genres.slice(0, 2).map(g => g.name).join(' · ')}</p>
       )}
     </Link>
   )
@@ -474,7 +542,7 @@ function SongRow({ song }) {
         : <div className="w-10 h-10 rounded bg-gray-800 flex items-center justify-center text-gray-500 shrink-0">♪</div>}
       <div className="min-w-0 flex-1">
         <p className="text-white text-sm font-medium truncate group-hover:text-violet-400 transition-colors">{song.title}</p>
-        <p className="text-gray-500 text-xs truncate">{song.artist?.name}{song.album ? ` · ${song.album.title}` : ''}</p>
+        <p className="text-gray-400 text-xs truncate">{song.artist?.name}{song.album ? ` · ${song.album.title}` : ''}</p>
       </div>
       {song.average_rating && (
         <span className="text-yellow-400 text-xs shrink-0">★ {song.average_rating.toFixed(1)}</span>
@@ -521,7 +589,7 @@ function ListCard({ list, likeState, onLike, onFork, forking, copied, currentUse
             <Avatar username={list.owner_username} avatarUrl={list.owner_avatar_url} size={4} />
             <span className="text-violet-400 text-xs hover:text-violet-300 transition-colors truncate">{list.owner_username}</span>
           </Link>
-          <span className="text-gray-600 text-xs shrink-0">{list.item_count} item{list.item_count !== 1 ? 's' : ''}</span>
+          <span className="text-gray-400 text-xs shrink-0">{list.item_count} item{list.item_count !== 1 ? 's' : ''}</span>
         </div>
         {canAct ? (
           <div className="flex gap-1.5 pt-0.5">
@@ -544,7 +612,7 @@ function ListCard({ list, likeState, onLike, onFork, forking, copied, currentUse
             </button>
           </div>
         ) : count > 0 && (
-          <p className="text-xs text-gray-600">♥ {count} {count === 1 ? 'save' : 'saves'}</p>
+          <p className="text-xs text-gray-400">♥ {count} {count === 1 ? 'save' : 'saves'}</p>
         )}
       </div>
     </div>
@@ -553,7 +621,7 @@ function ListCard({ list, likeState, onLike, onFork, forking, copied, currentUse
 
 function EmptyState() {
   return (
-    <div className="card p-12 text-center text-gray-500">
+    <div className="card p-12 text-center text-gray-400">
       <p className="text-lg mb-1">Nothing here yet</p>
       <p className="text-sm">Try adjusting the filters or add some content!</p>
     </div>

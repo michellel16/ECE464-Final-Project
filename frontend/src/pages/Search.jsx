@@ -129,20 +129,20 @@ export default function Search() {
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-8 space-y-6">
-      <h1 className="text-2xl font-bold text-white">
+      <h1 className="text-2xl font-bold text-white font-display">
         Results for <span className="text-violet-400">"{q}"</span>
       </h1>
 
       {/* ── Tabs ── */}
-      <div className="flex gap-1 border-b border-gray-800">
+      <div className="flex gap-1 border-b border-[#252540]">
         {TABS.map(t => (
           <button
             key={t}
             onClick={() => setTab(t)}
-            className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${
+            className={`px-4 py-2 text-xs font-medium tracking-wide transition-colors border-b-2 -mb-px ${
               tab === t
-                ? 'border-violet-500 text-violet-400'
-                : 'border-transparent text-gray-500 hover:text-gray-300'
+                ? 'border-violet-500 text-violet-300'
+                : 'border-transparent text-gray-400 hover:text-gray-200'
             }`}
           >
             {t}
@@ -162,12 +162,12 @@ export default function Search() {
                 {localResults.artists.map(a => (
                   <Link key={a.id} to={`/artists/${a.id}`} className="group card p-4 flex flex-col items-center gap-2 hover:border-violet-700 transition-colors">
                     {a.image_url ? (
-                      <img src={a.image_url} alt={a.name} className="w-20 h-20 rounded-full object-cover" loading="lazy" />
+                      <img src={a.image_url} alt={a.name} className="w-20 h-20 rounded-full object-cover ring-1 ring-white/25" loading="lazy" />
                     ) : (
-                      <div className="w-20 h-20 rounded-full bg-gradient-to-br from-violet-900 to-gray-800 flex items-center justify-center text-3xl">🎤</div>
+                      <div className="w-20 h-20 rounded-full bg-gradient-to-br from-violet-900 to-[#1a1a2e] flex items-center justify-center text-3xl ring-1 ring-white/25">🎤</div>
                     )}
-                    <p className="text-white font-medium text-sm text-center group-hover:text-violet-400 transition-colors">{a.name}</p>
-                    <p className="text-gray-500 text-xs text-center">{a.genres?.join(', ')}</p>
+                    <p className="text-gray-100 font-medium text-xs text-center group-hover:text-violet-400 transition-colors">{a.name}</p>
+                    <p className="text-gray-400 text-[10px] text-center">{a.genres?.join(', ')}</p>
                   </Link>
                 ))}
               </div>
@@ -181,13 +181,13 @@ export default function Search() {
                 {localResults.albums.map(a => (
                   <Link key={a.id} to={`/albums/${a.id}`} className="card p-3 flex items-center gap-4 hover:border-violet-700 transition-colors group">
                     {a.cover_url ? (
-                      <img src={a.cover_url} alt={a.title} className="w-12 h-12 rounded object-cover shrink-0" loading="lazy" />
+                      <img src={a.cover_url} alt={a.title} className="w-12 h-12 rounded object-cover shrink-0 ring-1 ring-white/25" loading="lazy" />
                     ) : (
-                      <div className="w-12 h-12 rounded bg-gray-800 flex items-center justify-center text-xl shrink-0">🎵</div>
+                      <div className="w-12 h-12 rounded bg-[#1a1a2e] flex items-center justify-center text-xl shrink-0 ring-1 ring-white/25">🎵</div>
                     )}
                     <div className="min-w-0">
-                      <p className="text-white font-medium group-hover:text-violet-400 transition-colors truncate">{a.title}</p>
-                      <p className="text-gray-500 text-sm">{a.artist?.name} · {a.release_date?.slice(0, 4)}</p>
+                      <p className="text-gray-100 text-sm font-medium group-hover:text-violet-400 transition-colors truncate">{a.title}</p>
+                      <p className="text-gray-400 text-xs">{a.artist?.name} · {a.release_date?.slice(0, 4)}</p>
                     </div>
                   </Link>
                 ))}
@@ -202,13 +202,13 @@ export default function Search() {
                 {localResults.songs.map(s => (
                   <Link key={s.id} to={`/songs/${s.id}`} className="card p-3 flex items-center gap-4 hover:border-violet-700 transition-colors group">
                     {s.album?.cover_url ? (
-                      <img src={s.album.cover_url} alt="" className="w-10 h-10 rounded object-cover shrink-0" loading="lazy" />
+                      <img src={s.album.cover_url} alt="" className="w-10 h-10 rounded object-cover shrink-0 ring-1 ring-white/25" loading="lazy" />
                     ) : (
-                      <div className="w-10 h-10 rounded bg-gray-800 flex items-center justify-center shrink-0">♪</div>
+                      <div className="w-10 h-10 rounded bg-[#1a1a2e] flex items-center justify-center shrink-0 ring-1 ring-white/25">♪</div>
                     )}
                     <div className="min-w-0">
-                      <p className="text-white font-medium group-hover:text-violet-400 transition-colors truncate">{s.title}</p>
-                      <p className="text-gray-500 text-sm">{s.artist?.name}{s.album ? ` · ${s.album.title}` : ''}</p>
+                      <p className="text-gray-100 text-sm font-medium group-hover:text-violet-400 transition-colors truncate">{s.title}</p>
+                      <p className="text-gray-400 text-xs">{s.artist?.name}{s.album ? ` · ${s.album.title}` : ''}</p>
                     </div>
                   </Link>
                 ))}
@@ -224,8 +224,8 @@ export default function Search() {
                   <Link key={u.username} to={`/users/${u.username}`} className="card p-4 flex items-center gap-3 hover:border-violet-700 transition-colors group">
                     <Avatar username={u.username} size={10} />
                     <div className="min-w-0">
-                      <p className="text-white font-medium group-hover:text-violet-400 transition-colors">{u.username}</p>
-                      {u.bio && <p className="text-gray-500 text-xs truncate">{u.bio}</p>}
+                      <p className="text-gray-100 text-sm font-medium group-hover:text-violet-400 transition-colors">{u.username}</p>
+                      {u.bio && <p className="text-gray-400 text-xs truncate">{u.bio}</p>}
                     </div>
                   </Link>
                 ))}
@@ -239,15 +239,15 @@ export default function Search() {
               <div className="space-y-2">
                 {localResults.lists.map(l => (
                   <Link key={l.id} to={`/lists/${l.id}`} className="card p-3 flex items-center gap-4 hover:border-violet-700 transition-colors group">
-                    <div className="w-10 h-10 rounded bg-gray-800 flex items-center justify-center text-gray-500 shrink-0 text-lg">♪</div>
+                    <div className="w-10 h-10 rounded bg-[#1a1a2e] flex items-center justify-center text-gray-400 shrink-0 text-lg ring-1 ring-white/25">♪</div>
                     <div className="min-w-0 flex-1">
-                      <p className="text-white font-medium group-hover:text-violet-400 transition-colors truncate">{l.name}</p>
-                      <p className="text-gray-500 text-sm">
-                        {l.owner_username && <span className="text-violet-400/80">{l.owner_username}</span>}
-                        <span className="text-gray-600"> · {l.item_count} item{l.item_count !== 1 ? 's' : ''}</span>
+                      <p className="text-gray-100 text-sm font-medium group-hover:text-violet-400 transition-colors truncate">{l.name}</p>
+                      <p className="text-xs">
+                        {l.owner_username && <span className="text-violet-300">{l.owner_username}</span>}
+                        <span className="text-gray-500"> · {l.item_count} item{l.item_count !== 1 ? 's' : ''}</span>
                       </p>
                     </div>
-                    <span className="text-[10px] text-gray-500 border border-gray-700 px-1.5 py-0.5 rounded-full shrink-0">
+                    <span className="text-[10px] text-gray-400 border border-[#2a2a45] px-1.5 py-0.5 rounded shrink-0">
                       {LIST_TYPE_LABELS[l.list_type] ?? l.list_type}
                     </span>
                   </Link>
@@ -314,13 +314,13 @@ export default function Search() {
                 {similarAlbums.items.map(a => (
                   <Link key={a.id} to={`/albums/${a.id}`} className="card p-3 flex items-center gap-4 hover:border-violet-700 transition-colors group">
                     {a.cover_url ? (
-                      <img src={a.cover_url} alt={a.title} className="w-12 h-12 rounded object-cover shrink-0" loading="lazy" />
+                      <img src={a.cover_url} alt={a.title} className="w-12 h-12 rounded object-cover shrink-0 ring-1 ring-white/25" loading="lazy" />
                     ) : (
-                      <div className="w-12 h-12 rounded bg-gray-800 flex items-center justify-center text-xl shrink-0">🎵</div>
+                      <div className="w-12 h-12 rounded bg-[#1a1a2e] flex items-center justify-center text-xl shrink-0 ring-1 ring-white/25">🎵</div>
                     )}
                     <div className="min-w-0 flex-1">
-                      <p className="text-white font-medium group-hover:text-violet-400 transition-colors truncate">{a.title}</p>
-                      <p className="text-gray-500 text-sm">{a.artist?.name} · {a.release_date?.slice(0, 4)}</p>
+                      <p className="text-gray-100 text-sm font-medium group-hover:text-violet-400 transition-colors truncate">{a.title}</p>
+                      <p className="text-gray-400 text-xs">{a.artist?.name} · {a.release_date?.slice(0, 4)}</p>
                     </div>
                     {a.similarity != null && (
                       <span className="text-[10px] text-violet-400/70 shrink-0">{Math.round(a.similarity * 100)}% match</span>
@@ -366,25 +366,25 @@ export default function Search() {
                 <Section title="Artists on Spotify">
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                     {spotifyResults.artists.map(a => (
-                      <div key={a.spotify_id} className="card p-4 flex flex-col items-center gap-2">
+                      <div key={a.spotify_id} className="card p-4 flex flex-col items-center gap-2 hover:border-violet-700 transition-colors">
                         {a.image_url ? (
-                          <img src={a.image_url} alt={a.name} className="w-20 h-20 rounded-full object-cover" loading="lazy" />
+                          <img src={a.image_url} alt={a.name} className="w-20 h-20 rounded-full object-cover ring-1 ring-white/25" loading="lazy" />
                         ) : (
-                          <div className="w-20 h-20 rounded-full bg-gradient-to-br from-green-900/40 to-gray-800 flex items-center justify-center text-3xl">🎤</div>
+                          <div className="w-20 h-20 rounded-full bg-gradient-to-br from-violet-900 to-[#1a1a2e] flex items-center justify-center text-3xl ring-1 ring-white/25">🎤</div>
                         )}
-                        <p className="text-white font-medium text-sm text-center">{a.name}</p>
+                        <p className="text-gray-100 font-medium text-xs text-center">{a.name}</p>
                         {a.genres.length > 0 && (
-                          <p className="text-gray-500 text-xs text-center">{a.genres.slice(0, 2).join(', ')}</p>
+                          <p className="text-gray-400 text-[10px] text-center">{a.genres.slice(0, 2).join(', ')}</p>
                         )}
                         {a.tunelog_artist_id ? (
-                          <Link to={`/artists/${a.tunelog_artist_id}`} className="text-xs text-violet-400 hover:text-violet-300 transition-colors font-medium">
+                          <Link to={`/artists/${a.tunelog_artist_id}`} className="text-xs text-violet-300 hover:text-violet-200 transition-colors font-medium">
                             View in Tunelog →
                           </Link>
                         ) : (
                           <button
                             onClick={() => importArtist(a.spotify_id)}
                             disabled={!!importing[a.spotify_id]}
-                            className="text-xs px-3 py-1 rounded-full bg-green-700/30 text-green-400 border border-green-700/50 hover:bg-green-700/50 disabled:opacity-50 transition-colors font-medium"
+                            className="text-xs px-3 py-1 rounded bg-green-700/30 text-green-300 border border-green-700/50 hover:bg-green-700/50 disabled:opacity-50 transition-colors font-medium"
                           >
                             {importing[a.spotify_id] ? 'Importing…' : '+ Import'}
                           </button>
@@ -399,25 +399,25 @@ export default function Search() {
                 <Section title="Albums on Spotify">
                   <div className="space-y-2">
                     {spotifyResults.albums.map(a => (
-                      <div key={a.spotify_id} className="card p-3 flex items-center gap-4">
+                      <div key={a.spotify_id} className="card p-3 flex items-center gap-4 hover:border-violet-700 transition-colors">
                         {a.cover_url ? (
-                          <img src={a.cover_url} alt={a.name} className="w-12 h-12 rounded object-cover shrink-0" loading="lazy" />
+                          <img src={a.cover_url} alt={a.name} className="w-12 h-12 rounded object-cover shrink-0 ring-1 ring-white/25" loading="lazy" />
                         ) : (
-                          <div className="w-12 h-12 rounded bg-gray-800 flex items-center justify-center text-xl shrink-0">🎵</div>
+                          <div className="w-12 h-12 rounded bg-[#1a1a2e] flex items-center justify-center text-xl shrink-0 ring-1 ring-white/25">🎵</div>
                         )}
                         <div className="min-w-0 flex-1">
-                          <p className="text-white font-medium truncate">{a.name}</p>
-                          <p className="text-gray-500 text-sm">{a.artist_name} · {a.release_date} · {a.track_count} tracks</p>
+                          <p className="text-gray-100 text-sm font-medium truncate">{a.name}</p>
+                          <p className="text-gray-400 text-xs">{a.artist_name} · {a.release_date} · {a.track_count} tracks</p>
                         </div>
                         {a.tunelog_album_id ? (
-                          <Link to={`/albums/${a.tunelog_album_id}`} className="text-xs text-violet-400 hover:text-violet-300 transition-colors font-medium shrink-0">
+                          <Link to={`/albums/${a.tunelog_album_id}`} className="text-xs text-violet-300 hover:text-violet-200 transition-colors font-medium shrink-0">
                             View →
                           </Link>
                         ) : (
                           <button
                             onClick={() => importAlbum(a.spotify_id)}
                             disabled={!!importing[a.spotify_id]}
-                            className="text-xs px-3 py-1.5 rounded-full bg-green-700/30 text-green-400 border border-green-700/50 hover:bg-green-700/50 disabled:opacity-50 transition-colors font-medium shrink-0"
+                            className="text-xs px-3 py-1 rounded bg-green-700/30 text-green-300 border border-green-700/50 hover:bg-green-700/50 disabled:opacity-50 transition-colors font-medium shrink-0"
                           >
                             {importing[a.spotify_id] ? 'Importing…' : '+ Import'}
                           </button>
@@ -432,25 +432,25 @@ export default function Search() {
                 <Section title="Tracks on Spotify">
                   <div className="space-y-2">
                     {spotifyResults.tracks.map(t => (
-                      <div key={t.spotify_id} className="card p-3 flex items-center gap-4">
+                      <div key={t.spotify_id} className="card p-3 flex items-center gap-4 hover:border-violet-700 transition-colors">
                         {t.cover_url ? (
-                          <img src={t.cover_url} alt="" className="w-10 h-10 rounded object-cover shrink-0" loading="lazy" />
+                          <img src={t.cover_url} alt="" className="w-10 h-10 rounded object-cover shrink-0 ring-1 ring-white/25" loading="lazy" />
                         ) : (
-                          <div className="w-10 h-10 rounded bg-gray-800 flex items-center justify-center shrink-0 text-gray-600">♪</div>
+                          <div className="w-10 h-10 rounded bg-[#1a1a2e] flex items-center justify-center shrink-0 ring-1 ring-white/25 text-gray-400">♪</div>
                         )}
                         <div className="min-w-0 flex-1">
-                          <p className="text-white font-medium truncate">{t.name}</p>
-                          <p className="text-gray-500 text-sm truncate">{t.artist_name}{t.album_name ? ` · ${t.album_name}` : ''}</p>
+                          <p className="text-gray-100 text-sm font-medium truncate">{t.name}</p>
+                          <p className="text-gray-400 text-xs truncate">{t.artist_name}{t.album_name ? ` · ${t.album_name}` : ''}</p>
                         </div>
                         {t.tunelog_song_id ? (
-                          <Link to={`/songs/${t.tunelog_song_id}`} className="text-xs text-violet-400 hover:text-violet-300 transition-colors font-medium shrink-0">
+                          <Link to={`/songs/${t.tunelog_song_id}`} className="text-xs text-violet-300 hover:text-violet-200 transition-colors font-medium shrink-0">
                             View →
                           </Link>
                         ) : (
                           <button
                             onClick={() => importTrack(t.spotify_id)}
                             disabled={!!importing[t.spotify_id]}
-                            className="text-xs px-3 py-1.5 rounded-full bg-green-700/30 text-green-400 border border-green-700/50 hover:bg-green-700/50 disabled:opacity-50 transition-colors font-medium shrink-0"
+                            className="text-xs px-3 py-1 rounded bg-green-700/30 text-green-300 border border-green-700/50 hover:bg-green-700/50 disabled:opacity-50 transition-colors font-medium shrink-0"
                           >
                             {importing[t.spotify_id] ? 'Importing…' : '+ Import'}
                           </button>

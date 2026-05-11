@@ -104,10 +104,10 @@ export default function Navbar() {
   const navLink = (to, label) => (
     <Link
       to={to}
-      className={`text-sm transition-colors ${
+      className={`text-[10px] font-semibold tracking-widest uppercase transition-colors pb-0.5 border-b ${
         location.pathname === to
-          ? 'text-white font-medium'
-          : 'text-gray-400 hover:text-white'
+          ? 'text-white border-violet-500'
+          : 'text-gray-300 hover:text-white border-transparent'
       }`}
     >
       {label}
@@ -115,36 +115,38 @@ export default function Navbar() {
   )
 
   return (
-    <nav className="fixed top-0 inset-x-0 z-50 backdrop-blur border-b border-gray-800" style={{ backgroundColor: 'rgba(5,5,13,0.95)' }}>
-      <div className="max-w-7xl mx-auto px-4 h-16 flex items-center gap-4">
+    <nav className="fixed top-0 inset-x-0 z-50 backdrop-blur-md border-b border-[#252540]" style={{ backgroundColor: 'rgba(5,5,13,0.97)' }}>
+      <div className="max-w-7xl mx-auto px-6 h-15 flex items-center gap-6" style={{ height: '60px' }}>
         {/* Logo */}
-        <Link to="/" className="flex items-center gap-2 shrink-0 mr-2">
-          <div className="w-8 h-8 bg-gradient-to-br from-violet-500 to-pink-500 rounded-lg flex items-center justify-center text-white font-bold text-sm">
+        <Link to="/" className="flex items-center gap-2.5 shrink-0 mr-2">
+          <div className="w-7 h-7 bg-gradient-to-br from-pink-500 to-violet-700 flex items-center justify-center text-white font-semibold text-xs rounded-sm"
+               style={{ fontFamily: '"Playfair Display", serif', fontStyle: 'italic', fontSize: '15px' }}>
             T
           </div>
-          <span className="hidden sm:block font-bold text-lg bg-gradient-to-r from-violet-400 to-pink-400 bg-clip-text text-transparent">
+          <span className="hidden sm:block font-semibold text-[15px] tracking-wide uppercase bg-gradient-to-r from-pink-300 via-violet-200 to-violet-300 bg-clip-text text-transparent"
+                style={{ letterSpacing: '0.12em' }}>
             Tunelog
           </span>
         </Link>
 
         {/* Search */}
-        <div className="flex-1 max-w-lg relative" ref={searchRef}>
+        <div className="flex-1 max-w-md relative" ref={searchRef}>
           <form onSubmit={handleSearch}>
             <input
               value={q}
               onChange={e => setQ(e.target.value)}
               onFocus={() => setShowHistory(true)}
               placeholder="Search artists, albums, songs…"
-              className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-full px-4 py-2 focus:outline-none focus:border-violet-500 placeholder-gray-500 transition-colors"
+              className="w-full bg-[#0b0b18] border border-[#252535] text-white text-xs rounded px-4 py-2 focus:outline-none focus:border-violet-600/70 placeholder-gray-500 transition-colors"
             />
           </form>
           {showHistory && history.length > 0 && (
-            <div className="absolute top-full mt-2 left-0 right-0 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl py-1 z-50 overflow-hidden">
+            <div className="absolute top-full mt-1.5 left-0 right-0 bg-[#0e0e1c] border border-[#1c1c2e] rounded shadow-2xl py-1 z-50 overflow-hidden">
               <div className="flex items-center justify-between px-3 py-1.5">
-                <span className="text-xs text-gray-500 font-medium">Recent searches</span>
+                <span className="text-[10px] text-gray-400 font-semibold uppercase tracking-widest">Recent searches</span>
                 <button
                   onClick={clearHistory}
-                  className="text-xs text-gray-500 hover:text-red-400 transition-colors"
+                  className="text-[10px] text-gray-500 hover:text-red-400 transition-colors"
                 >
                   Clear all
                 </button>
@@ -153,16 +155,16 @@ export default function Navbar() {
                 <button
                   key={term}
                   onClick={() => selectHistory(term)}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors text-left group"
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-[#1a1a2e] hover:text-white transition-colors text-left group"
                 >
-                  <svg className="w-3.5 h-3.5 text-gray-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-3 h-3 text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                   <span className="flex-1 truncate">{term}</span>
                   <span
                     role="button"
                     onClick={e => removeFromHistory(term, e)}
-                    className="text-gray-600 hover:text-gray-300 transition-colors shrink-0 px-1"
+                    className="text-gray-500 hover:text-gray-300 transition-colors shrink-0 px-1"
                   >
                     ✕
                   </span>
@@ -173,9 +175,9 @@ export default function Navbar() {
         </div>
 
         {/* Nav links */}
-        <div className="hidden md:flex items-center gap-5">
+        <div className="hidden md:flex items-center gap-6">
           {navLink('/discover', 'Discover')}
-          {user && navLink('/lists', 'My Lists')}
+          {user && navLink('/lists', 'Lists')}
           {user && navLink('/stats', 'Stats')}
         </div>
 
@@ -184,7 +186,7 @@ export default function Navbar() {
           <div className="relative shrink-0" ref={bellRef}>
             <button
               onClick={openBell}
-              className="relative p-2 text-gray-400 hover:text-white transition-colors"
+              className="relative p-2 text-gray-300 hover:text-white transition-colors"
               title="Recommendations"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -199,18 +201,18 @@ export default function Navbar() {
             </button>
 
             {bellOpen && (
-              <div className="absolute right-0 mt-2 w-80 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl overflow-hidden z-50">
-                <div className="px-4 py-3 border-b border-gray-800">
-                  <span className="text-sm font-semibold text-white">Notifications</span>
+              <div className="absolute right-0 top-full mt-1 w-80 bg-[#0e0e1c] border border-[#252535] rounded shadow-2xl overflow-hidden z-50">
+                <div className="px-4 py-3 border-b border-[#252535]">
+                  <span className="text-[10px] font-semibold text-gray-300 tracking-widest uppercase">Notifications</span>
                 </div>
                 {bellLoading ? (
                   <div className="flex items-center justify-center py-8">
                     <div className="w-5 h-5 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
                   </div>
                 ) : notifications.length === 0 ? (
-                  <p className="text-gray-500 text-sm text-center py-8 px-4">No notifications yet.</p>
+                  <p className="text-gray-400 text-xs text-center py-8 px-4">No notifications yet.</p>
                 ) : (
-                  <div className="divide-y divide-gray-800/60 max-h-80 overflow-y-auto">
+                  <div className="divide-y divide-[#1c1c2e] max-h-80 overflow-y-auto">
                     {notifications.map(n => <NotifRow key={n.id} n={n} onClose={() => setBellOpen(false)} />)}
                   </div>
                 )}
@@ -225,16 +227,16 @@ export default function Navbar() {
             <div className="relative" ref={menuRef}>
               <button
                 onClick={() => setMenu(!menuOpen)}
-                className="flex items-center gap-2 bg-gray-800 hover:bg-gray-700 rounded-full px-3 py-1.5 transition-colors"
+                className="flex items-center gap-2 hover:bg-white/5 rounded px-2.5 py-1.5 transition-colors border border-transparent hover:border-[#1c1c2e]"
               >
-                <Avatar username={user.username} avatarUrl={user.avatar_url} size={6} />
-                <span className="text-sm text-gray-200 hidden sm:block">{user.username}</span>
+                <Avatar username={user.username} avatarUrl={user.avatar_url} size={8} />
+                <span className="text-sm text-white hidden sm:block font-medium">{user.username}</span>
               </button>
               {menuOpen && (
-                <div className="absolute right-0 mt-2 w-52 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl py-1 overflow-hidden">
+                <div className="absolute right-0 top-full mt-1 w-52 bg-[#0e0e1c] border border-[#252535] rounded shadow-2xl py-1 overflow-hidden">
                   <Link
                     to={`/users/${user.username}`}
-                    className="flex items-center gap-2 px-4 py-2.5 text-sm text-gray-300 hover:bg-gray-800 hover:text-white"
+                    className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-200 hover:bg-[#1a1a2e] hover:text-white"
                     onClick={() => setMenu(false)}
                   >
                     <Avatar username={user.username} avatarUrl={user.avatar_url} size={6} />
@@ -242,22 +244,22 @@ export default function Navbar() {
                   </Link>
                   <Link
                     to="/lists"
-                    className="block px-4 py-2.5 text-sm text-gray-300 hover:bg-gray-800 hover:text-white"
+                    className="block px-4 py-2.5 text-sm text-gray-200 hover:bg-[#1a1a2e] hover:text-white"
                     onClick={() => setMenu(false)}
                   >
                     My Lists
                   </Link>
                   <Link
                     to="/stats"
-                    className="block px-4 py-2.5 text-sm text-gray-300 hover:bg-gray-800 hover:text-white"
+                    className="block px-4 py-2.5 text-sm text-gray-200 hover:bg-[#1a1a2e] hover:text-white"
                     onClick={() => setMenu(false)}
                   >
                     Stats
                   </Link>
-                  <div className="border-t border-gray-800 mt-1 pt-1">
+                  <div className="border-t border-[#252535] mt-1 pt-1">
                     <button
                       onClick={() => { logout(); setMenu(false); navigate('/') }}
-                      className="w-full text-left px-4 py-2.5 text-sm text-red-400 hover:bg-gray-800"
+                      className="w-full text-left px-4 py-2.5 text-sm text-red-400 hover:bg-[#1a1a2e]"
                     >
                       Sign out
                     </button>
@@ -267,8 +269,8 @@ export default function Navbar() {
             </div>
           ) : (
             <div className="flex items-center gap-3">
-              <Link to="/login"    className="text-sm text-gray-400 hover:text-white transition-colors">Sign in</Link>
-              <Link to="/register" className="btn-primary text-sm py-1.5 px-4">Sign up</Link>
+              <Link to="/login"    className="text-xs text-gray-300 hover:text-white transition-colors">Sign in</Link>
+              <Link to="/register" className="btn-primary text-xs py-1.5 px-4">Sign up</Link>
             </div>
           )}
         </div>
@@ -319,15 +321,15 @@ function NotifRow({ n, onClose }) {
   const coverUrl = item?.cover_url ?? null
   const target  = href()
   const content = (
-    <div className={`flex items-center gap-3 px-4 py-3 transition-colors ${n.is_read ? 'opacity-70' : ''} hover:bg-gray-800`}>
-      <div className="w-9 h-9 rounded-full bg-gray-800 flex items-center justify-center text-sm shrink-0 overflow-hidden">
+    <div className={`flex items-center gap-3 px-4 py-2.5 transition-colors ${n.is_read ? 'opacity-60' : ''} hover:bg-[#1a1a2e]`}>
+      <div className="w-8 h-8 rounded bg-[#1a1a2e] flex items-center justify-center text-xs shrink-0 overflow-hidden border border-[#252535]">
         {coverUrl
           ? <img src={coverUrl} alt="" className="w-full h-full object-cover" />
           : <span>{ICONS[n.type] ?? '🔔'}</span>}
       </div>
       <div className="min-w-0 flex-1">
-        <p className="text-gray-300 text-xs leading-snug">{label()}</p>
-        {n.note && <p className="text-gray-600 text-xs italic truncate mt-0.5">"{n.note}"</p>}
+        <p className="text-gray-200 text-[11px] leading-snug">{label()}</p>
+        {n.note && <p className="text-gray-500 text-[10px] italic truncate mt-0.5">"{n.note}"</p>}
         {!n.is_read && <span className="inline-block w-1.5 h-1.5 rounded-full bg-violet-500 ml-1 align-middle" />}
       </div>
     </div>

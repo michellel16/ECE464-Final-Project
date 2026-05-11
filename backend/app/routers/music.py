@@ -332,6 +332,13 @@ def list_artists(
             .offset(skip).limit(limit).all()
         )
 
+    elif sort == 'newest':
+        artists = (
+            _gf(db.query(models.Artist).options(*opts))
+            .order_by(models.Artist.id.desc())
+            .offset(skip).limit(limit).all()
+        )
+
     elif sort == 'alpha':
         artists = (
             _gf(db.query(models.Artist).options(*opts))
@@ -975,6 +982,13 @@ def list_songs(
             _gf(db.query(models.Song).options(*opts))
             .join(avg_sub, avg_sub.c.song_id == models.Song.id)
             .order_by(avg_sub.c.avg_rating.desc(), avg_sub.c.review_count.desc())
+            .offset(skip).limit(limit).all()
+        )
+
+    elif sort == 'newest':
+        songs = (
+            _gf(db.query(models.Song).options(*opts))
+            .order_by(models.Song.id.desc())
             .offset(skip).limit(limit).all()
         )
 

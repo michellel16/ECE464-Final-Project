@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useParams, Link, useSearchParams, useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import { useAuth } from '../contexts/AuthContext'
@@ -38,7 +38,7 @@ export default function Profile() {
   useEffect(() => {
     Promise.allSettled([
       axios.get(`/api/users/${username}`),
-      axios.get(`/api/users/${username}/reviews`),
+      axios.get(`/api/users/${username}/reviews?limit=500`),
       axios.get(`/api/lists/user/${username}`),
       me && !isMe ? axios.get(`/api/users/${username}/follow-status`) : Promise.resolve(null),
     ]).then(([pRes, rRes, lRes, fsRes]) => {
@@ -132,7 +132,7 @@ export default function Profile() {
       {/* Profile header */}
       <div className="card mb-6 overflow-hidden">
         {/* Banner */}
-        <div className="relative h-36 sm:h-44 bg-gradient-to-br from-violet-950/80 via-gray-900 to-gray-900 shrink-0">
+        <div className="relative h-36 sm:h-44 bg-gradient-to-br from-pink-950 via-violet-950 to-gray-900 shrink-0">
           {profile.banner_url && (
             <img src={profile.banner_url} alt="" className="w-full h-full object-cover" />
           )}
@@ -140,16 +140,16 @@ export default function Profile() {
 
         {/* Avatar + actions row */}
         <div className="relative z-10 px-5 sm:px-6">
-          <div className="flex items-end justify-between -mt-10 sm:-mt-12 mb-3">
-            <div className="relative z-10 ring-4 ring-gray-900 rounded-full shrink-0">
+          <div className="flex items-end justify-between -mt-10 sm:-mt-12 mb-2">
+            <div className="relative z-10 ring-4 ring-[#05050d] rounded-full shrink-0">
               <Avatar username={profile.username} avatarUrl={profile.avatar_url} size={20} />
             </div>
-            <div className="pb-1 flex gap-2 items-center shrink-0">
-              {me && !isMe && (
+            {me && !isMe && (
+              <div className="pb-1">
                 <button
                   onClick={toggleFollow}
                   disabled={followLoading}
-                  className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors disabled:opacity-60 ${
+                  className={`px-3 py-1.5 rounded text-xs font-medium transition-colors disabled:opacity-60 ${
                     isFollowing
                       ? 'bg-gray-700 text-white hover:bg-red-900/60 hover:text-red-300'
                       : isRequested
@@ -159,55 +159,55 @@ export default function Profile() {
                 >
                   {followLoading ? '…' : isFollowing ? 'Following' : isRequested ? 'Requested' : 'Follow'}
                 </button>
-              )}
-              {isMe && (
-                <>
-                  <button onClick={() => setShowEditProfile(true)} className="btn-secondary text-sm px-4 py-1.5">Edit Profile</button>
-                  <button onClick={() => setShowAccountSettings(true)} className="btn-secondary text-sm px-4 py-1.5">Account</button>
-                  {spotifyStatus !== null && (
-                    <div className="relative">
-                      {spotifyStatus.connected ? (
-                        <>
-                          <button
-                            onClick={() => setShowSpotifyMenu(m => !m)}
-                            className="flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-green-700/30 border border-green-700/50 text-green-400 text-sm font-medium transition-colors hover:bg-green-700/50"
-                          >
-                            <SpotifyIcon className="w-3.5 h-3.5" />
-                            Spotify
-                            <span className="text-xs">{showSpotifyMenu ? '▲' : '▼'}</span>
-                          </button>
-                          {showSpotifyMenu && (
-                            <div className="absolute right-0 top-full mt-1.5 z-30 bg-gray-900 border border-gray-700 rounded-xl overflow-hidden shadow-xl min-w-[148px]">
-                              <button
-                                onClick={() => { setShowImport(true); setShowSpotifyMenu(false) }}
-                                className="w-full text-left px-4 py-2.5 text-sm text-green-400 hover:bg-gray-800 transition-colors"
-                              >
-                                Import Music
-                              </button>
-                              <div className="border-t border-gray-800" />
-                              <button
-                                onClick={disconnectSpotify}
-                                className="w-full text-left px-4 py-2.5 text-sm text-gray-400 hover:bg-gray-800 hover:text-red-400 transition-colors"
-                              >
-                                Disconnect
-                              </button>
-                            </div>
-                          )}
-                        </>
-                      ) : (
+              </div>
+            )}
+            {isMe && (
+              <div className="flex gap-2 items-center pb-1">
+                <button onClick={() => setShowEditProfile(true)} className="btn-secondary text-xs px-3 py-1.5">Edit Profile</button>
+                <button onClick={() => setShowAccountSettings(true)} className="btn-secondary text-xs px-3 py-1.5">Account</button>
+                {spotifyStatus !== null && (
+                  <div className="relative">
+                    {spotifyStatus.connected ? (
+                      <>
                         <button
-                          onClick={connectSpotify}
-                          className="flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-green-600 hover:bg-green-500 text-white text-sm font-medium transition-colors"
+                          onClick={() => setShowSpotifyMenu(m => !m)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-green-700/30 border border-green-700/50 text-green-300 text-xs font-medium transition-colors hover:bg-green-700/50"
                         >
-                          <SpotifyIcon className="w-3.5 h-3.5" />
+                          <SpotifyIcon className="w-3 h-3" />
                           Spotify
+                          <span className="text-[10px]">{showSpotifyMenu ? '▲' : '▼'}</span>
                         </button>
-                      )}
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
+                        {showSpotifyMenu && (
+                          <div className="absolute right-0 top-full mt-1.5 z-30 bg-[#111127] border border-[#252540] rounded overflow-hidden shadow-xl min-w-[148px]">
+                            <button
+                              onClick={() => { setShowImport(true); setShowSpotifyMenu(false) }}
+                              className="w-full text-left px-4 py-2.5 text-xs text-green-400 hover:bg-[#1a1a2e] transition-colors"
+                            >
+                              Import Music
+                            </button>
+                            <div className="border-t border-[#252540]" />
+                            <button
+                              onClick={disconnectSpotify}
+                              className="w-full text-left px-4 py-2.5 text-xs text-gray-300 hover:bg-[#1a1a2e] hover:text-red-400 transition-colors"
+                            >
+                              Disconnect
+                            </button>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <button
+                        onClick={connectSpotify}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-green-600 hover:bg-green-500 text-white text-xs font-medium transition-colors"
+                      >
+                        <SpotifyIcon className="w-3 h-3" />
+                        Connect Spotify
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Name + bio + stats */}
@@ -218,26 +218,26 @@ export default function Profile() {
                 <span title="Private account" className="text-gray-500 text-base">🔒</span>
               )}
             </h1>
-            {profile.bio && <p className="text-gray-400 mt-1 text-sm">{profile.bio}</p>}
+            {profile.bio && <p className="text-gray-300 mt-1 text-sm">{profile.bio}</p>}
             {/* Music preference tags */}
             {(profile.music_preferences?.genres?.length > 0 || profile.music_preferences?.moods?.length > 0) && (
               <div className="flex flex-wrap gap-1.5 mt-2">
                 {profile.music_preferences.genres?.map(g => (
-                  <span key={g} className="text-[11px] bg-violet-900/30 text-violet-400 border border-violet-800/40 rounded-full px-2 py-0.5">
+                  <span key={g} className="text-[10px] bg-violet-900/40 text-violet-200 border border-violet-700/50 rounded px-2 py-0.5">
                     {g}
                   </span>
                 ))}
                 {profile.music_preferences.moods?.map(m => (
-                  <span key={m} className="text-[11px] bg-pink-900/20 text-pink-400 border border-pink-800/30 rounded-full px-2 py-0.5">
+                  <span key={m} className="text-[10px] bg-pink-900/30 text-pink-200 border border-pink-700/40 rounded px-2 py-0.5">
                     {m}
                   </span>
                 ))}
               </div>
             )}
             {profile.music_preferences?.free_text && (
-              <p className="text-gray-500 text-xs mt-1 italic">"{profile.music_preferences.free_text}"</p>
+              <p className="text-gray-400 text-xs mt-1 italic">"{profile.music_preferences.free_text}"</p>
             )}
-            <div className="flex gap-5 mt-3 text-sm text-gray-400">
+            <div className="flex gap-5 mt-3 text-sm text-gray-200">
               <button onClick={() => setFollowModal('followers')} className="hover:text-white transition-colors">
                 <strong className="text-white">{profile.follower_count ?? 0}</strong> followers
               </button>
@@ -272,7 +272,7 @@ export default function Profile() {
       ) : (
         <>
           {/* Tabs */}
-          <div className="flex flex-wrap gap-1 bg-gray-900 rounded-xl p-1 w-fit mb-6">
+          <div className="flex flex-wrap items-center gap-1 bg-gray-900 rounded-xl p-1 w-fit mb-6">
             {[
               'reviews',
               'lists',
@@ -284,7 +284,7 @@ export default function Profile() {
               <button
                 key={t}
                 onClick={() => setTab(t)}
-                className={`px-5 py-2 rounded-lg text-sm font-medium transition-colors capitalize ${
+                className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors capitalize ${
                   tab === t ? 'bg-violet-600 text-white' : 'text-gray-400 hover:text-white'
                 }`}
               >
@@ -1485,7 +1485,7 @@ function EditProfileModal({ profile, onClose, onSaved }) {
                   onChange={e => setGenreSearch(e.target.value)}
                 />
                 {genreSearch.trim() && (
-                  <div className="absolute z-10 left-0 right-0 bg-gray-800 border border-gray-700 rounded-lg mt-1 max-h-40 overflow-y-auto shadow-xl">
+                  <div className="absolute top-full z-10 left-0 right-0 bg-[#111127] border border-[#252540] rounded mt-1 max-h-40 overflow-y-auto shadow-xl">
                     {availableGenres
                       .filter(g =>
                         !POPULAR_GENRES.includes(g.name) &&
@@ -1497,12 +1497,12 @@ function EditProfileModal({ profile, onClose, onSaved }) {
                           key={g.id}
                           type="button"
                           onClick={() => { toggleGenre(g.name); setGenreSearch('') }}
-                          className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-700 transition-colors flex items-center justify-between ${
-                            selectedGenres.includes(g.name) ? 'text-violet-400' : 'text-gray-300'
+                          className={`w-full text-left px-3 py-2 text-xs hover:bg-[#1a1a2e] transition-colors flex items-center justify-between ${
+                            selectedGenres.includes(g.name) ? 'text-violet-300' : 'text-gray-300'
                           }`}
                         >
                           {g.name}
-                          {selectedGenres.includes(g.name) && <span className="text-violet-400 text-xs">✓</span>}
+                          {selectedGenres.includes(g.name) && <span className="text-violet-400 text-[10px]">✓</span>}
                         </button>
                       ))
                     }
@@ -1510,7 +1510,7 @@ function EditProfileModal({ profile, onClose, onSaved }) {
                       !POPULAR_GENRES.includes(g.name) &&
                       g.name.toLowerCase().includes(genreSearch.toLowerCase().trim())
                     ).length === 0 && (
-                      <p className="px-3 py-2 text-sm text-gray-500">No genres found</p>
+                      <p className="px-3 py-2 text-xs text-gray-500">No genres found</p>
                     )}
                   </div>
                 )}
@@ -1787,17 +1787,93 @@ function SpotifyIcon({ className = '' }) {
 }
 
 function ReviewsTab({ reviews }) {
-  const [page, setPage] = useState(1)
+  const [page, setPage]           = useState(1)
+  const [query, setQuery]         = useState('')
+  const [typeFilter, setTypeFilter] = useState('all')
   const PAGE_SIZE = 10
+
+  const filtered = useMemo(() => {
+    let list = reviews
+    if (typeFilter !== 'all') list = list.filter(r => r.target_type === typeFilter)
+    if (query.trim()) {
+      const q = query.trim().toLowerCase()
+      list = list.filter(r =>
+        r.target_title?.toLowerCase().includes(q) ||
+        r.target_artist?.toLowerCase().includes(q)
+      )
+    }
+    return list
+  }, [reviews, typeFilter, query])
+
+  useEffect(() => setPage(1), [typeFilter, query])
+
   if (reviews.length === 0) {
     return <div className="card p-8 text-center text-gray-500">No reviews yet.</div>
   }
-  const totalPages = Math.ceil(reviews.length / PAGE_SIZE)
-  const paged = reviews.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+  const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+
   return (
     <div className="space-y-3">
-      {paged.map(r => <ReviewItem key={r.id} review={r} />)}
-      <Pagination page={page} totalPages={totalPages} onPage={setPage} />
+      {/* Filter bar */}
+      <div className="flex flex-wrap items-center gap-2 mb-1">
+        <div className="relative">
+          <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+          </svg>
+          <input
+            type="text"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder="Search by title or artist…"
+            className="bg-[#0d0d1f] border border-[#2a2a45] text-white text-sm rounded pl-8 pr-7 py-2 focus:outline-none focus:border-violet-500 w-60 transition-colors placeholder-gray-500"
+          />
+          {query && (
+            <button onClick={() => setQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 transition-colors text-sm">✕</button>
+          )}
+        </div>
+
+        <div className="flex items-center gap-1 bg-gray-900 rounded-xl p-1">
+          {[
+            { value: 'all',   label: 'All'    },
+            { value: 'album', label: 'Albums' },
+            { value: 'song',  label: 'Songs'  },
+          ].map(({ value, label }) => (
+            <button
+              key={value}
+              onClick={() => setTypeFilter(value)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                typeFilter === value ? 'bg-violet-600 text-white' : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {(query || typeFilter !== 'all') && (
+          <button
+            onClick={() => { setQuery(''); setTypeFilter('all') }}
+            className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+          >
+            Clear
+          </button>
+        )}
+
+        <span className="text-gray-500 text-xs ml-auto">
+          {filtered.length} review{filtered.length !== 1 ? 's' : ''}
+        </span>
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="card p-6 text-center text-gray-500 text-sm">No reviews match these filters.</div>
+      ) : (
+        <>
+          {paged.map(r => <ReviewItem key={r.id} review={r} />)}
+          <Pagination page={page} totalPages={totalPages} onPage={setPage} />
+        </>
+      )}
     </div>
   )
 }

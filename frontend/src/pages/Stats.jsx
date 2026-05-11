@@ -60,14 +60,14 @@ export default function Stats() {
   return (
     <div className="max-w-5xl mx-auto px-4 py-8 space-y-8">
       <div>
-        <h1 className="text-3xl font-bold text-white">My Stats</h1>
+        <h1 className="text-3xl font-bold text-white font-display">My Stats</h1>
         <p className="text-gray-400 text-sm mt-1">Your music listening journey at a glance</p>
       </div>
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <StatCard label="Albums Listened"  value={stats.albums_listened}  emoji="💿" />
-        <StatCard label="Songs Listened"   value={stats.songs_listened}   emoji="🎵" />
+        <StatCard label="Albums Logged"  value={stats.albums_listened}  emoji="💿" />
+        <StatCard label="Songs Logged"   value={stats.songs_listened}   emoji="🎵" />
         <StatCard label="Reviews Written"  value={stats.total_reviews}    emoji="✍" />
         <StatCard
           label="Avg Rating Given"

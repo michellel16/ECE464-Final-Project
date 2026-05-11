@@ -15,14 +15,17 @@ router = APIRouter(prefix="/api/stats", tags=["stats"])
 def my_stats(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     uid = current_user.id
 
-    albums_listened = (
-        db.query(func.count(models.UserAlbumStatus.album_id))
-        .filter_by(user_id=uid, status="listened").scalar() or 0
-    )
-    songs_listened = (
-        db.query(func.count(models.UserSongStatus.song_id))
-        .filter_by(user_id=uid, status="listened").scalar() or 0
-    )
+    album_ids_reviewed = {r[0] for r in db.query(models.Review.album_id)
+        .filter(models.Review.user_id == uid, models.Review.album_id.isnot(None)).all()}
+    album_ids_status = {r[0] for r in db.query(models.UserAlbumStatus.album_id)
+        .filter_by(user_id=uid).all()}
+    albums_listened = len(album_ids_reviewed | album_ids_status)
+
+    song_ids_reviewed = {r[0] for r in db.query(models.Review.song_id)
+        .filter(models.Review.user_id == uid, models.Review.song_id.isnot(None)).all()}
+    song_ids_status = {r[0] for r in db.query(models.UserSongStatus.song_id)
+        .filter_by(user_id=uid).all()}
+    songs_listened = len(song_ids_reviewed | song_ids_status)
     total_reviews = (
         db.query(func.count(models.Review.id))
         .filter_by(user_id=uid).scalar() or 0
@@ -143,8 +146,23 @@ def postcard_stats(
             q = q.filter(model.created_at >= cutoff)
         return q.scalar() or 0
 
-    albums_listened = _count_q(models.UserAlbumStatus, user_id=uid, status="listened")
-    songs_listened  = _count_q(models.UserSongStatus,  user_id=uid, status="listened")
+    album_status_q = db.query(models.UserAlbumStatus.album_id).filter_by(user_id=uid)
+    if cutoff:
+        album_status_q = album_status_q.filter(models.UserAlbumStatus.created_at >= cutoff)
+    album_review_q = db.query(models.Review.album_id).filter(
+        models.Review.user_id == uid, models.Review.album_id.isnot(None))
+    if cutoff:
+        album_review_q = album_review_q.filter(models.Review.created_at >= cutoff)
+    albums_listened = len({r[0] for r in album_status_q.all()} | {r[0] for r in album_review_q.all()})
+
+    song_status_q = db.query(models.UserSongStatus.song_id).filter_by(user_id=uid)
+    if cutoff:
+        song_status_q = song_status_q.filter(models.UserSongStatus.created_at >= cutoff)
+    song_review_q = db.query(models.Review.song_id).filter(
+        models.Review.user_id == uid, models.Review.song_id.isnot(None))
+    if cutoff:
+        song_review_q = song_review_q.filter(models.Review.created_at >= cutoff)
+    songs_listened = len({r[0] for r in song_status_q.all()} | {r[0] for r in song_review_q.all()})
 
     # Reviews in period
     rev_q = db.query(models.Review).filter_by(user_id=uid)

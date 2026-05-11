@@ -192,6 +192,8 @@ def top_lists(
             lists,
             key=lambda l: (-trending_counts.get(l.id, 0), -like_counts.get(l.id, 0), -len(l.items)),
         )
+    elif sort == "newest":
+        sorted_lists = sorted(lists, key=lambda l: l.created_at, reverse=True)
     else:
         sorted_lists = sorted(lists, key=lambda l: (-like_counts.get(l.id, 0), -len(l.items)))
 

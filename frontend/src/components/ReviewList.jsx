@@ -72,7 +72,7 @@ export default function ReviewList({ reviews }) {
             value={query}
             onChange={e => setQuery(e.target.value)}
             placeholder="Search reviews…"
-            className="bg-gray-900 border border-gray-700 text-gray-300 text-sm rounded-lg pl-8 pr-7 py-1.5 focus:outline-none focus:border-violet-500 w-44 transition-colors"
+            className="bg-[#0d0d1f] border border-[#2a2a45] text-gray-200 text-sm rounded pl-8 pr-7 py-2 focus:outline-none focus:border-violet-500 w-52 transition-colors placeholder-gray-500"
           />
           {query && (
             <button onClick={() => setQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 transition-colors">
@@ -81,15 +81,15 @@ export default function ReviewList({ reviews }) {
           )}
         </div>
 
-        <div className="flex gap-1 bg-gray-900 rounded-lg p-1">
+        <div className="flex gap-1 bg-[#0d0d1f] border border-[#252540] rounded p-1">
           {SORT_OPTIONS.map(o => (
             <button
               key={o.value}
               onClick={() => setSort(o.value)}
-              className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
+              className={`px-3 py-1.5 rounded text-xs font-medium tracking-wide transition-colors ${
                 sort === o.value
                   ? 'bg-violet-600 text-white'
-                  : 'text-gray-400 hover:text-white'
+                  : 'text-gray-300 hover:text-white'
               }`}
             >
               {o.label}
@@ -99,10 +99,10 @@ export default function ReviewList({ reviews }) {
 
         <button
           onClick={() => setOnlyText(v => !v)}
-          className={`px-3 py-1.5 rounded-lg text-sm border transition-colors ${
+          className={`px-3 py-1.5 rounded text-xs border tracking-wide transition-colors ${
             onlyText
-              ? 'border-violet-500 text-violet-400 bg-violet-900/20'
-              : 'border-gray-700 text-gray-500 hover:border-gray-500 hover:text-gray-300'
+              ? 'border-violet-500 text-violet-300 bg-violet-900/20'
+              : 'border-[#252540] text-gray-400 hover:border-violet-600/50 hover:text-gray-200'
           }`}
         >
           Written only
@@ -111,15 +111,12 @@ export default function ReviewList({ reviews }) {
         {(sort !== 'all' || onlyText || query) && (
           <button
             onClick={() => { setSort('all'); setOnlyText(false); setQuery('') }}
-            className="text-xs text-gray-600 hover:text-gray-400 transition-colors ml-1"
+            className="text-xs text-gray-500 hover:text-gray-300 transition-colors ml-1"
           >
             Clear filters
           </button>
         )}
 
-        <span className="text-gray-600 text-xs ml-auto">
-          {filtered.length} of {reviews.length}
-        </span>
       </div>
 
       {/* Results */}
@@ -138,17 +135,17 @@ export default function ReviewList({ reviews }) {
               <button
                 onClick={() => setPage(p => Math.max(1, p - 1))}
                 disabled={page === 1}
-                className="px-3 py-1.5 rounded-lg text-sm bg-gray-800 text-gray-300 hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                className="px-3 py-1 rounded text-xs bg-[#1a1a2e] border border-[#252540] text-gray-300 hover:bg-[#252540] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               >
                 ← Prev
               </button>
-              <span className="text-sm text-gray-500">
-                Page {page} of {totalPages}
+              <span className="text-xs text-gray-400">
+                {page} / {totalPages}
               </span>
               <button
                 onClick={() => setPage(p => Math.min(totalPages, p + 1))}
                 disabled={page === totalPages}
-                className="px-3 py-1.5 rounded-lg text-sm bg-gray-800 text-gray-300 hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                className="px-3 py-1 rounded text-xs bg-[#1a1a2e] border border-[#252540] text-gray-300 hover:bg-[#252540] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               >
                 Next →
               </button>

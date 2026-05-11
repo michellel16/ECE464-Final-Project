@@ -41,7 +41,7 @@ export default function ReviewCard({ review: initial }) {
         </Link>
         <div className="flex items-center gap-2">
           <StarRating value={initial.rating} readonly size="sm" />
-          <span className="text-gray-500 text-xs">
+          <span className="text-gray-300 text-[10px]">
             {new Date(initial.created_at).toLocaleDateString()}
           </span>
         </div>
@@ -58,10 +58,10 @@ export default function ReviewCard({ review: initial }) {
           disabled={!user || toggling}
           className={`flex items-center gap-1.5 text-xs transition-colors ${
             !user
-              ? 'text-gray-700 cursor-default'
+              ? 'text-gray-600 cursor-default'
               : liked
               ? 'text-pink-400 hover:text-pink-300'
-              : 'text-gray-600 hover:text-pink-400'
+              : 'text-gray-500 hover:text-pink-400'
           }`}
           title={user ? (liked ? 'Unlike' : 'Like this review') : 'Sign in to like'}
         >

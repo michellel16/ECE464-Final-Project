@@ -70,7 +70,7 @@ export default function Charts() {
     <div className="max-w-5xl mx-auto px-4 py-8">
       {/* Header */}
       <div className="mb-6">
-        <h1 className="text-3xl font-bold text-white">Charts</h1>
+        <h1 className="text-3xl font-bold text-white font-display">Charts</h1>
         <p className="text-gray-400 text-sm mt-1">Top-rated music on Tunelog</p>
       </div>
 
@@ -98,15 +98,15 @@ export default function Charts() {
             <select
               value={selectedYear}
               onChange={e => { setYear(e.target.value); setDecade(''); setPage(0) }}
-              className="input text-sm py-1.5 px-3 min-w-[110px]"
+              className="input text-xs py-1.5 px-3 min-w-[110px]"
             >
-              <option value="">Any year</option>
+              <option value="">Search year...</option>
               {years.map(y => <option key={y} value={y}>{y}</option>)}
             </select>
             <select
               value={selectedDecade}
               onChange={e => { setDecade(e.target.value); setYear(''); setPage(0) }}
-              className="input text-sm py-1.5 px-3 min-w-[110px]"
+              className="input text-xs py-1.5 px-3 min-w-[110px]"
             >
               <option value="">Any decade</option>
               {decades.map(d => <option key={d} value={d}>{d}s</option>)}
@@ -116,13 +116,13 @@ export default function Charts() {
         <select
           value={selectedGenre}
           onChange={e => { setGenre(e.target.value); setPage(0) }}
-          className="input text-sm py-1.5 px-3 min-w-[130px]"
+          className="input text-xs py-1.5 px-3 min-w-[130px]"
         >
-          <option value="">All genres</option>
+          <option value="">Search genres...</option>
           {genres.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
         </select>
         {hasFilter && (
-          <button onClick={resetFilters} className="text-sm text-gray-400 hover:text-white transition-colors">
+          <button onClick={resetFilters} className="text-xs text-gray-400 hover:text-white transition-colors">
             Clear filters
           </button>
         )}

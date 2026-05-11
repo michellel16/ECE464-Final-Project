@@ -5,29 +5,48 @@
 @layer base {
   body {
     background-color: #05050d;
-    @apply text-gray-100;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    @apply text-gray-200;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    -webkit-font-smoothing: antialiased;
   }
 
-  ::-webkit-scrollbar       { width: 6px; }
+  ::-webkit-scrollbar       { width: 3px; }
   ::-webkit-scrollbar-track { background: #05050d; }
-  ::-webkit-scrollbar-thumb { @apply bg-violet-700 rounded-full; }
+  ::-webkit-scrollbar-thumb { background: #4c2a8a; }
 }
 
 @layer components {
+  /* Cards — slightly lifted from the body, visible border */
   .card {
-    @apply bg-gray-900 rounded-xl border border-gray-700/60;
+    @apply bg-[#111127] rounded border border-[#2e2e55];
   }
+
+  /* Primary button — rectangular, confident */
   .btn-primary {
-    @apply bg-violet-600 hover:bg-violet-500 text-white font-medium px-5 py-2 rounded-full transition-colors;
+    @apply bg-violet-600 hover:bg-violet-500 text-white font-medium px-5 py-2 rounded
+           transition-colors text-xs tracking-wide;
   }
+
+  /* Secondary button — outlined, clean */
   .btn-secondary {
-    @apply border border-violet-600 text-violet-400 hover:bg-violet-600/20 font-medium px-5 py-2 rounded-full transition-colors;
+    @apply border border-violet-600/60 text-violet-300 hover:bg-violet-600/10
+           font-medium px-5 py-2 rounded transition-colors text-xs tracking-wide;
   }
+
+  /* Input — slightly darker tint, sharp corners */
   .input {
-    @apply bg-gray-800 border border-gray-700 text-white rounded-lg px-4 py-2 w-full focus:outline-none focus:border-violet-500 transition-colors placeholder-gray-500;
+    @apply bg-[#0d0d1f] border border-[#2a2a45] text-white rounded px-4 py-2 w-full
+           focus:outline-none focus:border-violet-500/80 transition-colors
+           placeholder-gray-500;
   }
+
   .link-purple {
     @apply text-violet-400 hover:text-violet-300 transition-colors;
+  }
+
+  /* Editorial serif heading utility */
+  .heading-display {
+    font-family: 'Playfair Display', Georgia, serif;
   }
 }

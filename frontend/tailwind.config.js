@@ -3,10 +3,14 @@ export default {
   content: ['./index.html', './src/**/*.{js,jsx,ts,tsx}'],
   theme: {
     extend: {
+      fontFamily: {
+        display: ['"Playfair Display"', 'Georgia', 'serif'],
+        sans:    ['Inter', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
+      },
       colors: {
         brand: {
-          purple: '#8b5cf6',
-          pink:   '#ec4899',
+          purple: '#7c3aed',
+          pink:   '#db2777',
         },
       },
     },
