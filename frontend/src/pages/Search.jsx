@@ -19,13 +19,16 @@ export default function Search() {
   const { user } = useAuth()
   const navigate = useNavigate()
 
-  const [tab, setTab] = useState('All')
+  const [tab, setTab]           = useState('All')
+  const [vibeMode, setVibeMode] = useState(false)
+  function switchMode(vibe) { setVibeMode(vibe); setTab('All') }
 
   const [localResults, setLocalResults]     = useState(null)
   const [spotifyResults, setSpotifyResults] = useState(null)
   const [localLoading, setLocalLoading]     = useState(false)
   const [spotifyLoading, setSpotifyLoading] = useState(false)
   const [spotifyError, setSpotifyError]     = useState(null)
+  const [vibeError, setVibeError]           = useState(null)
   const [importing, setImporting]           = useState({})
   const [similarArtists, setSimilarArtists] = useState(null)
   const [similarAlbums, setSimilarAlbums]   = useState(null)
@@ -42,8 +45,8 @@ export default function Search() {
     setAlbumPage(1); setSongPage(1); setSpAlbumPage(1); setSpTrackPage(1)
   }, [q])
 
-  // Reset local pages when tab changes
-  useEffect(() => { setAlbumPage(1); setSongPage(1) }, [tab])
+  // Reset local pages when tab or mode changes
+  useEffect(() => { setAlbumPage(1); setSongPage(1) }, [tab, vibeMode])
 
   useEffect(() => {
     if (!q) {
@@ -55,39 +58,54 @@ export default function Search() {
     }
 
     setLocalLoading(true)
-    setSpotifyLoading(true)
     setLocalResults(null)
-    setSpotifyResults(null)
-    setSpotifyError(null)
     setSimilarArtists(null)
     setSimilarAlbums(null)
+    setVibeError(null)
 
-    axios.get(`/api/search/?q=${encodeURIComponent(q)}`)
-      .then(r => {
-        setLocalResults(r.data)
-        const topArtist = r.data.artists?.[0]
-        const topAlbum  = r.data.albums?.[0]
-        if (topArtist) {
-          axios.get(`/api/search/similar?item_type=artist&item_id=${topArtist.id}&limit=5`)
-            .then(s => { if (s.data.items?.length) setSimilarArtists(s.data) })
-            .catch(e => console.error('[similar artists]', e?.response?.data ?? e.message))
-        }
-        if (topAlbum) {
-          axios.get(`/api/search/similar?item_type=album&item_id=${topAlbum.id}&limit=5`)
-            .then(s => { if (s.data.items?.length) setSimilarAlbums(s.data) })
-            .catch(e => console.error('[similar albums]', e?.response?.data ?? e.message))
-        }
-      })
-      .finally(() => setLocalLoading(false))
+    if (vibeMode) {
+      // Semantic / vibe search — no Spotify section
+      setSpotifyResults(null)
+      setSpotifyLoading(false)
+      axios.get(`/api/search/semantic?q=${encodeURIComponent(q)}`)
+        .then(r => setLocalResults(r.data))
+        .catch(err => {
+          setVibeError(err.response?.data?.detail ?? 'Vibe search unavailable')
+          setLocalResults({ artists: [], albums: [], songs: [], users: [], lists: [] })
+        })
+        .finally(() => setLocalLoading(false))
+    } else {
+      setSpotifyLoading(true)
+      setSpotifyResults(null)
+      setSpotifyError(null)
 
-    axios.get(`/api/spotify/search?q=${encodeURIComponent(q)}`)
-      .then(r => setSpotifyResults(r.data))
-      .catch(err => {
-        setSpotifyError(err.response?.data?.detail ?? err.message ?? 'Unknown error')
-        setSpotifyResults(null)
-      })
-      .finally(() => setSpotifyLoading(false))
-  }, [q])
+      axios.get(`/api/search/?q=${encodeURIComponent(q)}`)
+        .then(r => {
+          setLocalResults(r.data)
+          const topArtist = r.data.artists?.[0]
+          const topAlbum  = r.data.albums?.[0]
+          if (topArtist) {
+            axios.get(`/api/search/similar?item_type=artist&item_id=${topArtist.id}&limit=5`)
+              .then(s => { if (s.data.items?.length) setSimilarArtists(s.data) })
+              .catch(e => console.error('[similar artists]', e?.response?.data ?? e.message))
+          }
+          if (topAlbum) {
+            axios.get(`/api/search/similar?item_type=album&item_id=${topAlbum.id}&limit=5`)
+              .then(s => { if (s.data.items?.length) setSimilarAlbums(s.data) })
+              .catch(e => console.error('[similar albums]', e?.response?.data ?? e.message))
+          }
+        })
+        .finally(() => setLocalLoading(false))
+
+      axios.get(`/api/spotify/search?q=${encodeURIComponent(q)}`)
+        .then(r => setSpotifyResults(r.data))
+        .catch(err => {
+          setSpotifyError(err.response?.data?.detail ?? err.message ?? 'Unknown error')
+          setSpotifyResults(null)
+        })
+        .finally(() => setSpotifyLoading(false))
+    }
+  }, [q, vibeMode])
 
   async function importAlbum(spotifyAlbumId) {
     if (!user) { navigate('/login'); return }
@@ -173,7 +191,7 @@ export default function Search() {
   )
 
   const localTotal = localResults
-    ? localResults.artists.length + localResults.albums.length + localResults.songs.length + localResults.users.length + (localResults.lists?.length ?? 0)
+    ? (localResults.artists?.length ?? 0) + (localResults.albums?.length ?? 0) + (localResults.songs?.length ?? 0) + (localResults.users?.length ?? 0) + (localResults.lists?.length ?? 0)
     : 0
 
   const hasSpotifyContent = spotifyResults && (
@@ -190,13 +208,34 @@ export default function Search() {
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-8 space-y-6">
-      <h1 className="text-2xl font-bold text-white font-display">
-        Results for <span className="text-violet-400">"{q}"</span>
-      </h1>
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <h1 className="text-2xl font-bold text-white font-display">
+          Results for <span className="text-violet-400">"{q}"</span>
+        </h1>
+        <div className="flex items-center gap-1 bg-[#14141f] border border-[#252540] rounded-lg p-1 text-xs font-medium">
+          <button
+            onClick={() => switchMode(false)}
+            className={`px-3 py-1.5 rounded-md transition-colors ${!vibeMode ? 'bg-violet-700 text-white' : 'text-gray-400 hover:text-gray-200'}`}
+          >
+            Exact
+          </button>
+          <button
+            onClick={() => switchMode(true)}
+            className={`px-3 py-1.5 rounded-md transition-colors ${vibeMode ? 'bg-violet-700 text-white' : 'text-gray-400 hover:text-gray-200'}`}
+          >
+            ✦ Vibe
+          </button>
+        </div>
+      </div>
+      {vibeMode && (
+        <p className="text-xs text-violet-400/70 -mt-4">
+          Search by mood and feel using AI — try "melancholy bedroom indie" or "upbeat summer pop"
+        </p>
+      )}
 
       {/* ── Tabs ── */}
       <div className="flex gap-1 border-b border-[#252540]">
-        {TABS.map(t => (
+        {(vibeMode ? ['All', 'Artists', 'Albums', 'Songs'] : TABS).map(t => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -228,7 +267,10 @@ export default function Search() {
                       <div className="w-20 h-20 rounded-full bg-gradient-to-br from-violet-900 to-[#1a1a2e] flex items-center justify-center text-3xl ring-1 ring-white/25">🎤</div>
                     )}
                     <p className="text-gray-100 font-medium text-xs text-center group-hover:text-violet-400 transition-colors">{a.name}</p>
-                    <p className="text-gray-400 text-[10px] text-center">{a.genres?.join(', ')}</p>
+                    {vibeMode && a.similarity != null
+                      ? <span className="text-[10px] text-violet-400/80">{Math.round(a.similarity * 100)}% match</span>
+                      : <p className="text-gray-400 text-[10px] text-center">{a.genres?.join(', ')}</p>
+                    }
                   </Link>
                 ))}
               </div>
@@ -246,10 +288,13 @@ export default function Search() {
                     ) : (
                       <div className="w-12 h-12 rounded bg-[#1a1a2e] flex items-center justify-center text-xl shrink-0 ring-1 ring-white/25">🎵</div>
                     )}
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <p className="text-gray-100 text-sm font-medium group-hover:text-violet-400 transition-colors truncate">{a.title}</p>
                       <p className="text-gray-400 text-xs">{a.artist?.name} · {a.release_date?.slice(0, 4)}</p>
                     </div>
+                    {vibeMode && a.similarity != null && (
+                      <span className="text-[10px] text-violet-400/80 shrink-0">{Math.round(a.similarity * 100)}% match</span>
+                    )}
                   </Link>
                 ))}
               </div>
@@ -268,10 +313,13 @@ export default function Search() {
                     ) : (
                       <div className="w-10 h-10 rounded bg-[#1a1a2e] flex items-center justify-center shrink-0 ring-1 ring-white/25">♪</div>
                     )}
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <p className="text-gray-100 text-sm font-medium group-hover:text-violet-400 transition-colors truncate">{s.title}</p>
                       <p className="text-gray-400 text-xs">{s.artist?.name}{s.album ? ` · ${s.album.title}` : ''}</p>
                     </div>
+                    {vibeMode && s.similarity != null && (
+                      <span className="text-[10px] text-violet-400/80 shrink-0">{Math.round(s.similarity * 100)}% match</span>
+                    )}
                   </Link>
                 ))}
               </div>
@@ -280,7 +328,7 @@ export default function Search() {
           )}
 
           {/* Users */}
-          {showUsers && localResults.users.length > 0 && (
+          {showUsers && (localResults.users?.length ?? 0) > 0 && (
             <Section title="Users">
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 {localResults.users.map(u => (
@@ -321,27 +369,36 @@ export default function Search() {
 
           {/* Empty state for filtered tab */}
           {localTotal > 0 && (
-            (tab === 'Artists' && localResults.artists.length === 0) ||
+            (tab === 'Artists' && (localResults.artists?.length ?? 0) === 0) ||
             (tab === 'Albums'  && localAlbums.length === 0)  ||
             (tab === 'Songs'   && localSongs.length === 0)   ||
-            (tab === 'Users'   && localResults.users.length === 0)   ||
+            (tab === 'Users'   && (localResults.users?.length ?? 0) === 0)   ||
             (tab === 'Lists'   && (localResults.lists?.length ?? 0) === 0)
           ) && (
             <p className="text-gray-500 text-sm">No {tab.toLowerCase()} found for "{q}".</p>
           )}
 
-          {localTotal === 0 && !spotifyLoading && tab !== 'Users' && tab !== 'Lists' && (
+          {localTotal === 0 && vibeMode && (
+            vibeError
+              ? <p className="text-red-400 text-sm">{vibeError}</p>
+              : <p className="text-gray-500 text-sm">
+                  No vibe matches found for "{q}". The catalog may not be indexed yet — run{' '}
+                  <code className="text-violet-400 text-xs">POST /api/search/backfill</code> to generate embeddings.
+                </p>
+          )}
+
+          {localTotal === 0 && !vibeMode && !spotifyLoading && tab !== 'Users' && tab !== 'Lists' && (
             <p className="text-gray-500 text-sm">No Tunelog results — see Spotify results below.</p>
           )}
 
-          {localTotal === 0 && (tab === 'Users' || tab === 'Lists') && (
+          {localTotal === 0 && !vibeMode && (tab === 'Users' || tab === 'Lists') && (
             <p className="text-gray-500 text-sm">No {tab.toLowerCase()} found for "{q}".</p>
           )}
         </div>
       )}
 
       {/* ── Recommended based on search ── */}
-      {(similarArtists || dedupedSimilarAlbums) && (tab === 'All' || tab === 'Artists' || tab === 'Albums') && (
+      {!vibeMode && (similarArtists || dedupedSimilarAlbums) && (tab === 'All' || tab === 'Artists' || tab === 'Albums') && (
         <div className="space-y-6 pt-2">
           <div className="flex items-center gap-3">
             <div className="flex-1 h-px bg-gray-800" />
@@ -397,7 +454,7 @@ export default function Search() {
       )}
 
       {/* ── Spotify section ── */}
-      {tab !== 'Users' && tab !== 'Lists' && (
+      {!vibeMode && tab !== 'Users' && tab !== 'Lists' && (
         <>
           {(hasSpotifyContent || spotifyLoading || spotifyError) && (
             <div className="flex items-center gap-3">

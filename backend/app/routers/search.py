@@ -1,7 +1,7 @@
 import asyncio
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy import text, or_
 from sqlalchemy.orm import Session, joinedload
 
@@ -273,10 +273,10 @@ async def similar_items(
             rows = db.execute(
                 text("""
                     SELECT a.id, a.name, a.image_url,
-                           1 - (a.embedding <=> :emb::vector) AS similarity
+                           1 - (a.embedding <=> CAST(:emb AS vector)) AS similarity
                     FROM artists a
                     WHERE a.embedding IS NOT NULL AND a.id != :self_id
-                    ORDER BY a.embedding <=> :emb::vector
+                    ORDER BY a.embedding <=> CAST(:emb AS vector)
                     LIMIT :lim
                 """),
                 {"emb": vec, "self_id": item_id, "lim": limit},
@@ -384,11 +384,11 @@ async def similar_items(
                 text("""
                     SELECT al.id, al.title, al.cover_url, al.release_date,
                            ar.id AS artist_id, ar.name AS artist_name,
-                           1 - (al.embedding <=> :emb::vector) AS similarity
+                           1 - (al.embedding <=> CAST(:emb AS vector)) AS similarity
                     FROM albums al
                     JOIN artists ar ON ar.id = al.artist_id
                     WHERE al.embedding IS NOT NULL AND al.id != :self_id
-                    ORDER BY al.embedding <=> :emb::vector
+                    ORDER BY al.embedding <=> CAST(:emb AS vector)
                     LIMIT :lim
                 """),
                 {"emb": vec, "self_id": item_id, "lim": limit},
@@ -478,12 +478,12 @@ async def similar_items(
                     SELECT s.id, s.title,
                            ar.id AS artist_id, ar.name AS artist_name,
                            al.id AS album_id, al.title AS album_title, al.cover_url,
-                           1 - (s.embedding <=> :emb::vector) AS similarity
+                           1 - (s.embedding <=> CAST(:emb AS vector)) AS similarity
                     FROM songs s
                     JOIN artists ar ON ar.id = s.artist_id
                     LEFT JOIN albums al ON al.id = s.album_id
                     WHERE s.embedding IS NOT NULL AND s.id != :self_id
-                    ORDER BY s.embedding <=> :emb::vector
+                    ORDER BY s.embedding <=> CAST(:emb AS vector)
                     LIMIT :lim
                 """),
                 {"emb": vec, "self_id": item_id, "lim": limit},
@@ -577,10 +577,10 @@ async def semantic_search(q: str):
         artist_rows = db.execute(
             text("""
                 SELECT id, name, image_url,
-                       1 - (embedding <=> :emb::vector) AS similarity
+                       1 - (embedding <=> CAST(:emb AS vector)) AS similarity
                 FROM artists
                 WHERE embedding IS NOT NULL
-                ORDER BY embedding <=> :emb::vector
+                ORDER BY embedding <=> CAST(:emb AS vector)
                 LIMIT 5
             """),
             {"emb": vec_literal},
@@ -591,11 +591,11 @@ async def semantic_search(q: str):
                 SELECT al.id, al.title, al.cover_url, al.release_date,
                        ar.id   AS artist_id,
                        ar.name AS artist_name,
-                       1 - (al.embedding <=> :emb::vector) AS similarity
+                       1 - (al.embedding <=> CAST(:emb AS vector)) AS similarity
                 FROM albums al
                 JOIN artists ar ON ar.id = al.artist_id
                 WHERE al.embedding IS NOT NULL
-                ORDER BY al.embedding <=> :emb::vector
+                ORDER BY al.embedding <=> CAST(:emb AS vector)
                 LIMIT 8
             """),
             {"emb": vec_literal},
@@ -609,24 +609,17 @@ async def semantic_search(q: str):
                        al.id    AS album_id,
                        al.title AS album_title,
                        al.cover_url,
-                       1 - (s.embedding <=> :emb::vector) AS similarity
+                       1 - (s.embedding <=> CAST(:emb AS vector)) AS similarity
                 FROM songs s
                 JOIN artists ar ON ar.id = s.artist_id
                 LEFT JOIN albums al ON al.id = s.album_id
                 WHERE s.embedding IS NOT NULL
-                ORDER BY s.embedding <=> :emb::vector
+                ORDER BY s.embedding <=> CAST(:emb AS vector)
                 LIMIT 8
             """),
             {"emb": vec_literal},
         ).fetchall()
 
-        artist_ids = [r.id for r in artist_rows]
-        artists_db = (
-            db.query(models.Artist).filter(models.Artist.id.in_(artist_ids)).all()
-            if artist_ids else []
-        )
-        await _enrich_missing_images(db, artists_db, [])
-        artist_images = {a.id: a.image_url for a in artists_db}
     finally:
         db.close()
 
@@ -635,7 +628,7 @@ async def semantic_search(q: str):
             {
                 "id": r.id,
                 "name": r.name,
-                "image_url": artist_images.get(r.id, r.image_url),
+                "image_url": r.image_url,
                 "similarity": round(float(r.similarity), 3),
             }
             for r in artist_rows
@@ -668,70 +661,137 @@ async def semantic_search(q: str):
     }
 
 
-# ── Backfill endpoint ─────────────────────────────────────────────────────────
+# ── Embedding status ─────────────────────────────────────────────────────────
 
-@router.post("/backfill")
-async def backfill_embeddings(db: Session = Depends(get_db)):
-    """
-    Generate embeddings for all artists, albums, and songs that don't have one yet.
-    Run this once after enabling the feature to seed the vector index.
-    Processes items concurrently in batches of 10 to avoid rate-limiting.
-    """
-    from ..embeddings import (
-        artist_text, album_text, song_text, get_embedding,
-    )
+@router.get("/backfill/status")
+def backfill_status(db: Session = Depends(get_db)):
+    def counts(model, col):
+        total     = db.query(model).count()
+        embedded  = db.query(model).filter(col.isnot(None)).count()
+        return {"embedded": embedded, "total": total, "remaining": total - embedded}
 
-    artists_todo = (
-        db.query(models.Artist)
-        .options(joinedload(models.Artist.genres))
-        .filter(models.Artist.embedding.is_(None))
-        .all()
-    )
-    albums_todo = (
-        db.query(models.Album)
-        .options(
-            joinedload(models.Album.artist).joinedload(models.Artist.genres),
-            joinedload(models.Album.genres),
-            joinedload(models.Album.reviews),
-        )
-        .filter(models.Album.embedding.is_(None))
-        .all()
-    )
-    songs_todo = (
-        db.query(models.Song)
-        .options(
-            joinedload(models.Song.artist).joinedload(models.Artist.genres),
-            joinedload(models.Song.album),
-            joinedload(models.Song.reviews),
-        )
-        .filter(models.Song.embedding.is_(None))
-        .all()
-    )
+    artists = counts(models.Artist, models.Artist.embedding)
+    albums  = counts(models.Album,  models.Album.embedding)
+    songs   = counts(models.Song,   models.Song.embedding)
 
-    async def _embed_batch(items, text_fn) -> int:
-        count = 0
-        batch_size = 5
-        for i in range(0, len(items), batch_size):
-            batch = items[i : i + batch_size]
-            vectors = await asyncio.gather(
-                *[get_embedding(text_fn(item)) for item in batch]
-            )
-            for item, vec in zip(batch, vectors):
-                if vec is not None:
-                    item.embedding = vec
-                    count += 1
-            db.commit()
-            if i + batch_size < len(items):
-                await asyncio.sleep(1.0)  # avoid OpenAI 429 rate limit
-        return count
-
-    artists_done = await _embed_batch(artists_todo, artist_text)
-    albums_done  = await _embed_batch(albums_todo,  album_text)
-    songs_done   = await _embed_batch(songs_todo,   song_text)
+    remaining = artists["remaining"] + albums["remaining"] + songs["remaining"]
+    est_seconds = (remaining // 5) * 1 + (remaining * 0.3)
 
     return {
-        "artists_embedded": artists_done,
-        "albums_embedded":  albums_done,
-        "songs_embedded":   songs_done,
-        "total": artists_done + albums_done + songs_done,
+        "artists": artists,
+        "albums":  albums,
+        "songs":   songs,
+        "total_remaining": remaining,
+        "estimated_seconds": round(est_seconds),
     }
+
+
+# ── Backfill endpoint ─────────────────────────────────────────────────────────
+
+async def _run_backfill():
+    """
+    Background task — opens its own session so the HTTP response returns immediately.
+    Processes items in small pages so it never loads thousands of rows at once.
+    Stops immediately if OpenAI is not configured or all embeddings fail.
+    """
+    import logging
+    from ..embeddings import artist_text, album_text, song_text, get_embedding, OPENAI_API_KEY
+    from ..database import SessionLocal
+
+    log = logging.getLogger(__name__)
+
+    if not OPENAI_API_KEY:
+        log.error("Backfill aborted: OPENAI_API_KEY is not set")
+        return
+
+    PAGE = 5
+
+    steps = [
+        (models.Artist, models.Artist.embedding,
+         lambda db: db.query(models.Artist).options(joinedload(models.Artist.genres)),
+         artist_text),
+        (models.Album, models.Album.embedding,
+         lambda db: db.query(models.Album).options(
+             joinedload(models.Album.artist).joinedload(models.Artist.genres),
+             joinedload(models.Album.genres),
+             joinedload(models.Album.reviews),
+         ),
+         album_text),
+        (models.Song, models.Song.embedding,
+         lambda db: db.query(models.Song).options(
+             joinedload(models.Song.artist).joinedload(models.Artist.genres),
+             joinedload(models.Song.album),
+             joinedload(models.Song.reviews),
+         ),
+         song_text),
+    ]
+
+    for _model, emb_col, base_query, text_fn in steps:
+        offset = 0
+        consecutive_failures = 0
+        while True:
+            db = SessionLocal()
+            try:
+                items = (
+                    base_query(db)
+                    .filter(emb_col.is_(None))
+                    .offset(offset)
+                    .limit(PAGE)
+                    .all()
+                )
+                if not items:
+                    break
+
+                vectors = await asyncio.gather(
+                    *[get_embedding(text_fn(item)) for item in items]
+                )
+
+                saved = 0
+                for item, vec in zip(items, vectors):
+                    if vec is None:
+                        continue
+                    item.embedding = vec
+                    try:
+                        db.commit()
+                        saved += 1
+                    except Exception as write_exc:
+                        log.warning("Backfill write failed for id=%s: %s — retrying with fresh session", item.id, write_exc)
+                        db.close()
+                        db = SessionLocal()
+                        # Re-fetch and retry once with a fresh connection
+                        try:
+                            fresh = db.query(_model).filter(_model.id == item.id).first()
+                            if fresh:
+                                fresh.embedding = vec
+                                db.commit()
+                                saved += 1
+                        except Exception as retry_exc:
+                            log.error("Backfill retry failed for id=%s: %s", item.id, retry_exc)
+
+                if saved == 0:
+                    consecutive_failures += 1
+                    if consecutive_failures >= 3:
+                        log.error("Backfill: no embeddings succeeded for 3 consecutive pages — aborting (check OPENAI_API_KEY and rate limits)")
+                        return
+                else:
+                    consecutive_failures = 0
+
+                offset += saved
+            except Exception as exc:
+                log.warning("Backfill page fetch failed: %s — retrying after 5s", exc)
+                await asyncio.sleep(5.0)
+                consecutive_failures += 1
+                if consecutive_failures >= 5:
+                    log.error("Backfill: too many consecutive failures — aborting")
+                    return
+                continue
+            finally:
+                db.close()
+
+            await asyncio.sleep(1.0)
+
+
+@router.post("/backfill")
+async def backfill_embeddings(background_tasks: BackgroundTasks):
+    background_tasks.add_task(_run_backfill)
+    return {"status": "started — poll GET /api/search/backfill/status to track progress"}

@@ -990,6 +990,10 @@ def seed_extra_data():
 
         new_users: dict[str, models.User] = {}
         for u in new_users_seed:
+            existing = db.query(models.User).filter(models.User.username == u["username"]).first()
+            if existing:
+                new_users[u["username"]] = existing
+                continue
             prefs = u.pop("prefs", None)
             user = models.User(
                 username=u["username"],
@@ -2206,8 +2210,8 @@ def seed_song_reviews():
                 user_id=u.id,
                 song_id=s.id,
                 rating=rating,
-                body=body,
-                likes_count=likes,
+                text=body,
+
                 created_at=datetime.utcnow() - timedelta(days=random.randint(1, 400)),
             )
             db.add(r)

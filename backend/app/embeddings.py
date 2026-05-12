@@ -15,9 +15,8 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-# Serialise ALL OpenAI calls process-wide: 1 in-flight at a time.
-# Free-tier keys are ~3 RPM; serialising avoids cascading 429s across users.
-_openai_sem = asyncio.Semaphore(1)
+# Allow up to 5 concurrent OpenAI calls (paid tier supports 500 RPM).
+_openai_sem = asyncio.Semaphore(5)
 
 # Limit concurrent background embedding tasks to 1 so they don't pile up
 # DB connections and exhaust the Supabase session-mode pool.
