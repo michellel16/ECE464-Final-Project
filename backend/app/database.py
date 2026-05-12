@@ -22,6 +22,10 @@ if not DATABASE_URL:
 # SQLAlchemy 2.x requires postgresql+psycopg2:// — normalize Railway's plain postgresql:// scheme
 if DATABASE_URL.startswith("postgresql://"):
     DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg2://", 1)
+# Railway's internal network doesn't need SSL — disable it when not explicitly set
+# to avoid psycopg2's SSL negotiation conflicting with Railway's proxy
+if "sslmode=" not in DATABASE_URL:
+    DATABASE_URL += ("&" if "?" in DATABASE_URL else "?") + "sslmode=disable"
 
 # Supabase's transaction-mode pooler (port 6543) manages its own connection pool,
 # so SQLAlchemy should not pool on top of it — use NullPool in that case.
