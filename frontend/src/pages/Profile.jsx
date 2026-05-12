@@ -37,20 +37,30 @@ export default function Profile() {
   }, [])
 
   useEffect(() => {
-    Promise.allSettled([
-      axios.get(`/api/users/${username}`),
-      axios.get(`/api/users/${username}/reviews?limit=100`),
-      axios.get(`/api/lists/user/${username}`),
-      me && !isMe ? axios.get(`/api/users/${username}/follow-status`) : Promise.resolve(null),
-    ]).then(([pRes, rRes, lRes, fsRes]) => {
-      if (pRes.status === 'fulfilled') setProfile(pRes.value.data)
-      if (rRes.status === 'fulfilled') setReviews(rRes.value.data)
-      if (lRes.status === 'fulfilled') setLists(lRes.value.data)
-      if (fsRes.status === 'fulfilled' && fsRes.value?.data) {
-        setFollowing(fsRes.value.data.following)
-        setRequested(fsRes.value.data.requested ?? false)
-      }
-    }).finally(() => setLoading(false))
+    setLoading(true)
+    setProfile(null)
+    setReviews([])
+    setLists([])
+    setFollowing(false)
+    setRequested(false)
+
+    // Load profile first so the page renders immediately
+    axios.get(`/api/users/${username}`)
+      .then(r => { setProfile(r.data); setLoading(false) })
+      .catch(() => setLoading(false))
+
+    // Load secondary data independently — renders as it arrives
+    axios.get(`/api/users/${username}/reviews?limit=100`)
+      .then(r => setReviews(r.data)).catch(() => {})
+    axios.get(`/api/lists/user/${username}`)
+      .then(r => setLists(r.data)).catch(() => {})
+    if (me && !isMe) {
+      axios.get(`/api/users/${username}/follow-status`)
+        .then(r => {
+          setFollowing(r.data.following)
+          setRequested(r.data.requested ?? false)
+        }).catch(() => {})
+    }
   }, [username, me])
 
   // Fetch Spotify connection status for own profile

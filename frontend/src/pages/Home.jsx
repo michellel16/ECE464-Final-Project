@@ -349,15 +349,15 @@ function RecommendedSongRow({ song }) {
 }
 
 function SuggestedUserCard({ user: u }) {
-  const [following, setFollowing] = useState(false)
+  const [followState, setFollowState] = useState(null) // null | 'following' | 'requested'
   const [loading, setLoading] = useState(false)
 
   async function follow() {
-    if (loading || following) return
+    if (loading || followState) return
     setLoading(true)
     try {
-      await axios.post(`/api/users/${u.username}/follow`)
-      setFollowing(true)
+      const { data } = await axios.post(`/api/users/${u.username}/follow`)
+      setFollowState(data.requested ? 'requested' : 'following')
     } finally {
       setLoading(false)
     }
@@ -380,14 +380,12 @@ function SuggestedUserCard({ user: u }) {
       </div>
       <button
         onClick={follow}
-        disabled={loading || following}
+        disabled={loading || !!followState}
         className={`text-xs px-3 py-1.5 rounded-full font-medium transition-colors ${
-          following
-            ? 'bg-gray-700 text-gray-400'
-            : 'btn-primary'
+          followState ? 'bg-gray-700 text-gray-400' : 'btn-primary'
         }`}
       >
-        {loading ? '…' : following ? 'Following' : 'Follow'}
+        {loading ? '…' : followState === 'requested' ? 'Requested' : followState === 'following' ? 'Following' : 'Follow'}
       </button>
     </div>
   )
