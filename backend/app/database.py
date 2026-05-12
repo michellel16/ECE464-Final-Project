@@ -17,9 +17,11 @@ DATABASE_URL = os.environ.get("APP_DATABASE_URL") or os.environ.get("DATABASE_UR
 if not DATABASE_URL:
     raise RuntimeError(
         "DATABASE_URL environment variable is not set. "
-        "On Railway: set APP_DATABASE_URL to the public Postgres URL. "
         "Locally: set DATABASE_URL in your .env file."
     )
+# SQLAlchemy 2.x requires postgresql+psycopg2:// — normalize Railway's plain postgresql:// scheme
+if DATABASE_URL.startswith("postgresql://"):
+    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg2://", 1)
 
 # Supabase's transaction-mode pooler (port 6543) manages its own connection pool,
 # so SQLAlchemy should not pool on top of it — use NullPool in that case.

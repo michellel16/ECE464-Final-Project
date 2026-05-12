@@ -25,7 +25,8 @@
       "PowerShell(Get-Content *)",
       "Bash(python3 -c ' *)",
       "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\miche\\\\PycharmProjects\\\\ECE464-Final-Project\" -Recurse -Directory | Select-Object -First 30 | ForEach-Object { $_.FullName })",
-      "Bash(Test-Path *)"
+      "Bash(Test-Path *)",
+      "Bash(git check-ignore *)"
     ]
   }
 }
