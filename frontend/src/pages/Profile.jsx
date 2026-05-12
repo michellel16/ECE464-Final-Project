@@ -38,7 +38,7 @@ export default function Profile() {
   useEffect(() => {
     Promise.allSettled([
       axios.get(`/api/users/${username}`),
-      axios.get(`/api/users/${username}/reviews?limit=500`),
+      axios.get(`/api/users/${username}/reviews?limit=100`),
       axios.get(`/api/lists/user/${username}`),
       me && !isMe ? axios.get(`/api/users/${username}/follow-status`) : Promise.resolve(null),
     ]).then(([pRes, rRes, lRes, fsRes]) => {
@@ -145,11 +145,11 @@ export default function Profile() {
               <Avatar username={profile.username} avatarUrl={profile.avatar_url} size={20} />
             </div>
             {me && !isMe && (
-              <div className="pb-1">
+              <div className="translate-y-6">
                 <button
                   onClick={toggleFollow}
                   disabled={followLoading}
-                  className={`px-3 py-1.5 rounded text-xs font-medium transition-colors disabled:opacity-60 ${
+                  className={`px-4 py-1.5 rounded text-sm font-medium transition-colors disabled:opacity-60 ${
                     isFollowing
                       ? 'bg-gray-700 text-white hover:bg-red-900/60 hover:text-red-300'
                       : isRequested
@@ -162,7 +162,7 @@ export default function Profile() {
               </div>
             )}
             {isMe && (
-              <div className="flex gap-2 items-center pb-1">
+              <div className="flex gap-2 items-center translate-y-3">
                 <button onClick={() => setShowEditProfile(true)} className="btn-secondary text-xs px-3 py-1.5">Edit Profile</button>
                 <button onClick={() => setShowAccountSettings(true)} className="btn-secondary text-xs px-3 py-1.5">Account</button>
                 {spotifyStatus !== null && (
@@ -211,33 +211,33 @@ export default function Profile() {
           </div>
 
           {/* Name + bio + stats */}
-          <div className="pb-5">
+          <div className="pb-6 space-y-4">
             <h1 className="text-2xl font-bold text-white flex items-center gap-2">
               {profile.username}
               {profile.is_private && (
                 <span title="Private account" className="text-gray-500 text-base">🔒</span>
               )}
             </h1>
-            {profile.bio && <p className="text-gray-300 mt-1 text-sm">{profile.bio}</p>}
+            {profile.bio && <p className="text-gray-300 text-sm">{profile.bio}</p>}
             {/* Music preference tags */}
             {(profile.music_preferences?.genres?.length > 0 || profile.music_preferences?.moods?.length > 0) && (
-              <div className="flex flex-wrap gap-1.5 mt-2">
+              <div className="flex flex-wrap gap-2">
                 {profile.music_preferences.genres?.map(g => (
-                  <span key={g} className="text-[10px] bg-violet-900/40 text-violet-200 border border-violet-700/50 rounded px-2 py-0.5">
+                  <span key={g} className="text-xs bg-violet-900/40 text-violet-200 border border-violet-700/50 rounded px-2.5 py-1">
                     {g}
                   </span>
                 ))}
                 {profile.music_preferences.moods?.map(m => (
-                  <span key={m} className="text-[10px] bg-pink-900/30 text-pink-200 border border-pink-700/40 rounded px-2 py-0.5">
+                  <span key={m} className="text-xs bg-pink-900/30 text-pink-200 border border-pink-700/40 rounded px-2.5 py-1">
                     {m}
                   </span>
                 ))}
               </div>
             )}
             {profile.music_preferences?.free_text && (
-              <p className="text-gray-400 text-xs mt-1 italic">"{profile.music_preferences.free_text}"</p>
+              <p className="text-gray-400 text-xs italic">"{profile.music_preferences.free_text}"</p>
             )}
-            <div className="flex gap-5 mt-3 text-sm text-gray-200">
+            <div className="flex gap-5 text-sm text-gray-200">
               <button onClick={() => setFollowModal('followers')} className="hover:text-white transition-colors">
                 <strong className="text-white">{profile.follower_count ?? 0}</strong> followers
               </button>
@@ -1912,7 +1912,12 @@ function ReviewItem({ review }) {
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between gap-2 mb-1">
           <div className="min-w-0">
-            <p className="text-white font-medium truncate">{review.target_title ?? '?'}</p>
+            <Link
+              to={`/${review.target_type}s/${review.target_type === 'album' ? review.album_id : review.song_id}#review-${review.id}`}
+              className="text-white font-medium truncate hover:text-violet-400 transition-colors block"
+            >
+              {review.target_title ?? '?'}
+            </Link>
             {review.target_artist && (
               <p className="text-gray-500 text-xs">{review.target_artist}</p>
             )}
@@ -1930,7 +1935,6 @@ const LIST_PAGE_SIZE = 12
 
 function ListsTab({ lists, isMe }) {
   const { user } = useAuth()
-  const [selectedList, setSelectedList] = useState(null)
   const [page, setPage] = useState(1)
   const [likeState, setLikeState] = useState(() => {
     const map = {}
@@ -1939,6 +1943,7 @@ function ListsTab({ lists, isMe }) {
   })
 
   async function toggleLike(listId, e) {
+    e.preventDefault()
     e.stopPropagation()
     if (!user) return
     try {
@@ -1964,10 +1969,10 @@ function ListsTab({ lists, isMe }) {
         <>
           <div className="grid sm:grid-cols-2 gap-4">
             {lists.slice((page - 1) * LIST_PAGE_SIZE, page * LIST_PAGE_SIZE).map(l => (
-              <button
+              <Link
                 key={l.id}
-                onClick={() => isMe && !l.is_public ? null : setSelectedList(l)}
-                className="card p-4 hover:border-violet-700 transition-colors group text-left"
+                to={`/lists/${l.id}`}
+                className="card p-4 hover:border-violet-700 transition-colors group text-left block"
               >
                 <div className="flex items-start justify-between gap-2">
                   <p className="font-medium text-white group-hover:text-violet-400 transition-colors">{l.name}</p>
@@ -1991,70 +1996,12 @@ function ListsTab({ lists, isMe }) {
                     )}
                   </div>
                 </div>
-              </button>
+              </Link>
             ))}
           </div>
           <Pagination page={page} totalPages={Math.ceil(lists.length / LIST_PAGE_SIZE)} onPage={setPage} />
         </>
       )}
-      {selectedList && (
-        <ListDetailModal list={selectedList} onClose={() => setSelectedList(null)} />
-      )}
-    </div>
-  )
-}
-
-function ListDetailModal({ list, onClose }) {
-  const [items, setItems]     = useState([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    axios.get(`/api/lists/${list.id}`)
-      .then(r => setItems(r.data.items ?? []))
-      .finally(() => setLoading(false))
-  }, [list.id])
-
-  return (
-    <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-lg shadow-2xl flex flex-col max-h-[80vh]">
-        <div className="flex items-center justify-between p-5 border-b border-gray-800 shrink-0">
-          <div>
-            <h2 className="font-bold text-white text-lg">{list.name}</h2>
-            {list.description && <p className="text-gray-500 text-sm mt-0.5">{list.description}</p>}
-          </div>
-          <button onClick={onClose} className="text-gray-500 hover:text-white text-xl leading-none ml-4">&times;</button>
-        </div>
-        <div className="overflow-y-auto flex-1">
-          {loading ? (
-            <div className="flex items-center justify-center py-10">
-              <div className="w-6 h-6 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
-            </div>
-          ) : items.length === 0 ? (
-            <p className="text-center text-gray-500 text-sm py-10">This list is empty.</p>
-          ) : (
-            <div className="divide-y divide-gray-800/60">
-              {items.map(item => (
-                <Link
-                  key={item.id}
-                  to={item.url}
-                  onClick={onClose}
-                  className="flex items-center gap-3 px-5 py-3 hover:bg-gray-800 transition-colors"
-                >
-                  {item.cover_url ? (
-                    <img src={item.cover_url} alt="" className="w-10 h-10 rounded shrink-0 object-cover" />
-                  ) : (
-                    <div className="w-10 h-10 rounded bg-gray-800 flex items-center justify-center text-gray-600 shrink-0">♪</div>
-                  )}
-                  <div className="min-w-0">
-                    <p className="text-white text-sm font-medium truncate">{item.title}</p>
-                    <p className="text-gray-500 text-xs">{item.artist} · <span className="capitalize">{item.type}</span></p>
-                  </div>
-                </Link>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
     </div>
   )
 }

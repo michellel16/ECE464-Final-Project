@@ -1,21 +1,23 @@
+import { lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
-import Navbar    from './components/Navbar'
-import Home      from './pages/Home'
-import Discover  from './pages/Discover'
-import Login     from './pages/Login'
-import Register  from './pages/Register'
-import Search    from './pages/Search'
-import ArtistPage from './pages/ArtistPage'
-import AlbumPage  from './pages/AlbumPage'
-import SongPage   from './pages/SongPage'
-import Profile    from './pages/Profile'
-import Lists      from './pages/Lists'
-import ListDetail from './pages/ListDetail'
-import Stats          from './pages/Stats'
-import Charts         from './pages/Charts'
-import ForgotPassword from './pages/ForgotPassword'
-import ResetPassword  from './pages/ResetPassword'
+import Navbar from './components/Navbar'
+
+const Home          = lazy(() => import('./pages/Home'))
+const Discover      = lazy(() => import('./pages/Discover'))
+const Login         = lazy(() => import('./pages/Login'))
+const Register      = lazy(() => import('./pages/Register'))
+const Search        = lazy(() => import('./pages/Search'))
+const ArtistPage    = lazy(() => import('./pages/ArtistPage'))
+const AlbumPage     = lazy(() => import('./pages/AlbumPage'))
+const SongPage      = lazy(() => import('./pages/SongPage'))
+const Profile       = lazy(() => import('./pages/Profile'))
+const Lists         = lazy(() => import('./pages/Lists'))
+const ListDetail    = lazy(() => import('./pages/ListDetail'))
+const Stats         = lazy(() => import('./pages/Stats'))
+const Charts        = lazy(() => import('./pages/Charts'))
+const ForgotPassword = lazy(() => import('./pages/ForgotPassword'))
+const ResetPassword  = lazy(() => import('./pages/ResetPassword'))
 
 function Protected({ children }) {
   const { user, loading } = useAuth()
@@ -39,24 +41,26 @@ function AppRoutes() {
     <div className="min-h-screen">
       <Navbar />
       <main className="pt-16">
-        <Routes>
-          <Route path="/"                element={<Home />} />
-          <Route path="/login"            element={<Login />} />
-          <Route path="/register"         element={<Register />} />
-          <Route path="/forgot-password"  element={<ForgotPassword />} />
-          <Route path="/reset-password"   element={<ResetPassword />} />
-          <Route path="/discover"        element={<Discover />} />
-          <Route path="/search"          element={<Search />} />
-          <Route path="/artists/:id"     element={<ArtistPage />} />
-          <Route path="/albums/:id"      element={<AlbumPage />} />
-          <Route path="/songs/:id"       element={<SongPage />} />
-          <Route path="/users/:username" element={<Profile />} />
-          <Route path="/lists"           element={<Protected><Lists /></Protected>} />
-          <Route path="/lists/:id"       element={<ListDetail />} />
-          <Route path="/stats"           element={<Protected><Stats /></Protected>} />
-          <Route path="/charts"          element={<Charts />} />
-          <Route path="*"                element={<Navigate to="/" replace />} />
-        </Routes>
+        <Suspense fallback={<Spinner />}>
+          <Routes>
+            <Route path="/"                element={<Home />} />
+            <Route path="/login"            element={<Login />} />
+            <Route path="/register"         element={<Register />} />
+            <Route path="/forgot-password"  element={<ForgotPassword />} />
+            <Route path="/reset-password"   element={<ResetPassword />} />
+            <Route path="/discover"        element={<Discover />} />
+            <Route path="/search"          element={<Search />} />
+            <Route path="/artists/:id"     element={<ArtistPage />} />
+            <Route path="/albums/:id"      element={<AlbumPage />} />
+            <Route path="/songs/:id"       element={<SongPage />} />
+            <Route path="/users/:username" element={<Profile />} />
+            <Route path="/lists"           element={<Protected><Lists /></Protected>} />
+            <Route path="/lists/:id"       element={<ListDetail />} />
+            <Route path="/stats"           element={<Protected><Stats /></Protected>} />
+            <Route path="/charts"          element={<Charts />} />
+            <Route path="*"                element={<Navigate to="/" replace />} />
+          </Routes>
+        </Suspense>
       </main>
     </div>
   )

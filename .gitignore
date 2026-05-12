@@ -2,6 +2,7 @@
 node_modules/
 dist/
 .env
+frontend/.env
 __pycache__/
 *.pyc
 *.db

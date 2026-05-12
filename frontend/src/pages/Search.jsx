@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useSearchParams, Link, useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import { useAuth } from '../contexts/AuthContext'
@@ -7,6 +7,11 @@ import { Avatar } from '../components/Navbar'
 const TABS = ['All', 'Artists', 'Albums', 'Songs', 'Users', 'Lists']
 
 const LIST_TYPE_LABELS = { custom: 'Custom', listened: 'Listened', want_to_listen: 'Want to Listen', favorites: 'Favorites' }
+
+const ALBUMS_PER_PAGE    = 6
+const SONGS_PER_PAGE     = 8
+const SP_ALBUMS_PER_PAGE = 5
+const SP_TRACKS_PER_PAGE = 6
 
 export default function Search() {
   const [params] = useSearchParams()
@@ -22,12 +27,23 @@ export default function Search() {
   const [spotifyLoading, setSpotifyLoading] = useState(false)
   const [spotifyError, setSpotifyError]     = useState(null)
   const [importing, setImporting]           = useState({})
-  const [similarArtists, setSimilarArtists] = useState(null)   // {label, items}
+  const [similarArtists, setSimilarArtists] = useState(null)
   const [similarAlbums, setSimilarAlbums]   = useState(null)
 
+  // Pagination state
+  const [albumPage, setAlbumPage]       = useState(1)
+  const [songPage, setSongPage]         = useState(1)
+  const [spAlbumPage, setSpAlbumPage]   = useState(1)
+  const [spTrackPage, setSpTrackPage]   = useState(1)
 
-  // Reset tab and similar results when query changes
-  useEffect(() => { setTab('All') }, [q])
+  // Reset everything when query changes
+  useEffect(() => {
+    setTab('All')
+    setAlbumPage(1); setSongPage(1); setSpAlbumPage(1); setSpTrackPage(1)
+  }, [q])
+
+  // Reset local pages when tab changes
+  useEffect(() => { setAlbumPage(1); setSongPage(1) }, [tab])
 
   useEffect(() => {
     if (!q) {
@@ -49,7 +65,6 @@ export default function Search() {
     axios.get(`/api/search/?q=${encodeURIComponent(q)}`)
       .then(r => {
         setLocalResults(r.data)
-        // Fire similar-item lookups immediately with the fresh data (no OpenAI)
         const topArtist = r.data.artists?.[0]
         const topAlbum  = r.data.albums?.[0]
         if (topArtist) {
@@ -107,6 +122,50 @@ export default function Search() {
     }
   }
 
+  // Sets of local IDs for de-duplication
+  const localAlbumIds = useMemo(
+    () => new Set((localResults?.albums ?? []).map(a => a.id)),
+    [localResults]
+  )
+  const localSongIds = useMemo(
+    () => new Set((localResults?.songs ?? []).map(s => s.id)),
+    [localResults]
+  )
+
+  // Recommended: strip items already shown in local results
+  const dedupedSimilarAlbums = useMemo(() => {
+    if (!similarAlbums) return null
+    const items = similarAlbums.items.filter(a => !localAlbumIds.has(a.id))
+    return items.length ? { ...similarAlbums, items } : null
+  }, [similarAlbums, localAlbumIds])
+
+  // Spotify results: strip entries already present in local results
+  const filteredSpAlbums = useMemo(
+    () => (spotifyResults?.albums ?? []).filter(
+      a => !(a.tunelog_album_id && localAlbumIds.has(a.tunelog_album_id))
+    ),
+    [spotifyResults, localAlbumIds]
+  )
+  const filteredSpTracks = useMemo(
+    () => (spotifyResults?.tracks ?? []).filter(
+      t => !(t.tunelog_song_id && localSongIds.has(t.tunelog_song_id))
+    ),
+    [spotifyResults, localSongIds]
+  )
+
+  // Paginated slices
+  const localAlbums      = localResults?.albums ?? []
+  const localSongs       = localResults?.songs  ?? []
+  const totalAlbumPages  = Math.max(1, Math.ceil(localAlbums.length / ALBUMS_PER_PAGE))
+  const totalSongPages   = Math.max(1, Math.ceil(localSongs.length / SONGS_PER_PAGE))
+  const totalSpAlbPages  = Math.max(1, Math.ceil(filteredSpAlbums.length / SP_ALBUMS_PER_PAGE))
+  const totalSpTrkPages  = Math.max(1, Math.ceil(filteredSpTracks.length / SP_TRACKS_PER_PAGE))
+
+  const pagedAlbums   = localAlbums.slice((albumPage   - 1) * ALBUMS_PER_PAGE,    albumPage   * ALBUMS_PER_PAGE)
+  const pagedSongs    = localSongs.slice( (songPage    - 1) * SONGS_PER_PAGE,     songPage    * SONGS_PER_PAGE)
+  const pagedSpAlbums = filteredSpAlbums.slice((spAlbumPage - 1) * SP_ALBUMS_PER_PAGE, spAlbumPage * SP_ALBUMS_PER_PAGE)
+  const pagedSpTracks = filteredSpTracks.slice((spTrackPage - 1) * SP_TRACKS_PER_PAGE, spTrackPage * SP_TRACKS_PER_PAGE)
+
   if (!q) return (
     <div className="max-w-3xl mx-auto px-4 py-16 text-center text-gray-500">
       Use the search bar above to find artists, albums, songs, or users.
@@ -117,8 +176,10 @@ export default function Search() {
     ? localResults.artists.length + localResults.albums.length + localResults.songs.length + localResults.users.length + (localResults.lists?.length ?? 0)
     : 0
 
-  const hasSpotify = spotifyResults && (
-    spotifyResults.tracks.length + spotifyResults.albums.length + spotifyResults.artists.length > 0
+  const hasSpotifyContent = spotifyResults && (
+    ((tab === 'All' || tab === 'Artists') && spotifyResults.artists.length > 0) ||
+    ((tab === 'All' || tab === 'Albums')  && filteredSpAlbums.length > 0) ||
+    ((tab === 'All' || tab === 'Songs')   && filteredSpTracks.length > 0)
   )
 
   const showArtists = tab === 'All' || tab === 'Artists'
@@ -175,10 +236,10 @@ export default function Search() {
           )}
 
           {/* Albums */}
-          {showAlbums && localResults.albums.length > 0 && (
-            <Section title="Albums">
+          {showAlbums && localAlbums.length > 0 && (
+            <Section title={`Albums${localAlbums.length > ALBUMS_PER_PAGE ? ` (${localAlbums.length})` : ''}`}>
               <div className="space-y-2">
-                {localResults.albums.map(a => (
+                {pagedAlbums.map(a => (
                   <Link key={a.id} to={`/albums/${a.id}`} className="card p-3 flex items-center gap-4 hover:border-violet-700 transition-colors group">
                     {a.cover_url ? (
                       <img src={a.cover_url} alt={a.title} className="w-12 h-12 rounded object-cover shrink-0 ring-1 ring-white/25" loading="lazy" />
@@ -192,14 +253,15 @@ export default function Search() {
                   </Link>
                 ))}
               </div>
+              <MiniPager page={albumPage} total={totalAlbumPages} onPage={setAlbumPage} />
             </Section>
           )}
 
           {/* Songs */}
-          {showSongs && localResults.songs.length > 0 && (
-            <Section title="Songs">
+          {showSongs && localSongs.length > 0 && (
+            <Section title={`Songs${localSongs.length > SONGS_PER_PAGE ? ` (${localSongs.length})` : ''}`}>
               <div className="space-y-2">
-                {localResults.songs.map(s => (
+                {pagedSongs.map(s => (
                   <Link key={s.id} to={`/songs/${s.id}`} className="card p-3 flex items-center gap-4 hover:border-violet-700 transition-colors group">
                     {s.album?.cover_url ? (
                       <img src={s.album.cover_url} alt="" className="w-10 h-10 rounded object-cover shrink-0 ring-1 ring-white/25" loading="lazy" />
@@ -213,6 +275,7 @@ export default function Search() {
                   </Link>
                 ))}
               </div>
+              <MiniPager page={songPage} total={totalSongPages} onPage={setSongPage} />
             </Section>
           )}
 
@@ -259,8 +322,8 @@ export default function Search() {
           {/* Empty state for filtered tab */}
           {localTotal > 0 && (
             (tab === 'Artists' && localResults.artists.length === 0) ||
-            (tab === 'Albums'  && localResults.albums.length === 0)  ||
-            (tab === 'Songs'   && localResults.songs.length === 0)   ||
+            (tab === 'Albums'  && localAlbums.length === 0)  ||
+            (tab === 'Songs'   && localSongs.length === 0)   ||
             (tab === 'Users'   && localResults.users.length === 0)   ||
             (tab === 'Lists'   && (localResults.lists?.length ?? 0) === 0)
           ) && (
@@ -278,7 +341,7 @@ export default function Search() {
       )}
 
       {/* ── Recommended based on search ── */}
-      {(similarArtists || similarAlbums) && (tab === 'All' || tab === 'Artists' || tab === 'Albums') && (
+      {(similarArtists || dedupedSimilarAlbums) && (tab === 'All' || tab === 'Artists' || tab === 'Albums') && (
         <div className="space-y-6 pt-2">
           <div className="flex items-center gap-3">
             <div className="flex-1 h-px bg-gray-800" />
@@ -307,11 +370,11 @@ export default function Search() {
             </div>
           )}
 
-          {similarAlbums && (tab === 'All' || tab === 'Albums') && (
+          {dedupedSimilarAlbums && (tab === 'All' || tab === 'Albums') && (
             <div className="space-y-3">
-              <p className="text-base font-semibold text-white">{similarAlbums.label}</p>
+              <p className="text-base font-semibold text-white">{dedupedSimilarAlbums.label}</p>
               <div className="space-y-2">
-                {similarAlbums.items.map(a => (
+                {dedupedSimilarAlbums.items.map(a => (
                   <Link key={a.id} to={`/albums/${a.id}`} className="card p-3 flex items-center gap-4 hover:border-violet-700 transition-colors group">
                     {a.cover_url ? (
                       <img src={a.cover_url} alt={a.title} className="w-12 h-12 rounded object-cover shrink-0 ring-1 ring-white/25" loading="lazy" />
@@ -333,10 +396,10 @@ export default function Search() {
         </div>
       )}
 
-      {/* ── Spotify section (All + Artists/Albums/Songs tabs, not Users/Lists) ── */}
+      {/* ── Spotify section ── */}
       {tab !== 'Users' && tab !== 'Lists' && (
         <>
-          {(hasSpotify || spotifyLoading || spotifyError) && (
+          {(hasSpotifyContent || spotifyLoading || spotifyError) && (
             <div className="flex items-center gap-3">
               <div className="flex-1 h-px bg-gray-800" />
               <span className="flex items-center gap-1.5 text-xs text-gray-500 font-medium">
@@ -360,7 +423,7 @@ export default function Search() {
             </div>
           )}
 
-          {!spotifyLoading && hasSpotify && (
+          {!spotifyLoading && hasSpotifyContent && (
             <div className="space-y-8">
               {(tab === 'All' || tab === 'Artists') && spotifyResults.artists.length > 0 && (
                 <Section title="Artists on Spotify">
@@ -395,10 +458,10 @@ export default function Search() {
                 </Section>
               )}
 
-              {(tab === 'All' || tab === 'Albums') && spotifyResults.albums.length > 0 && (
-                <Section title="Albums on Spotify">
+              {(tab === 'All' || tab === 'Albums') && filteredSpAlbums.length > 0 && (
+                <Section title={`Albums on Spotify${filteredSpAlbums.length > SP_ALBUMS_PER_PAGE ? ` (${filteredSpAlbums.length})` : ''}`}>
                   <div className="space-y-2">
-                    {spotifyResults.albums.map(a => (
+                    {pagedSpAlbums.map(a => (
                       <div key={a.spotify_id} className="card p-3 flex items-center gap-4 hover:border-violet-700 transition-colors">
                         {a.cover_url ? (
                           <img src={a.cover_url} alt={a.name} className="w-12 h-12 rounded object-cover shrink-0 ring-1 ring-white/25" loading="lazy" />
@@ -425,13 +488,14 @@ export default function Search() {
                       </div>
                     ))}
                   </div>
+                  <MiniPager page={spAlbumPage} total={totalSpAlbPages} onPage={setSpAlbumPage} />
                 </Section>
               )}
 
-              {(tab === 'All' || tab === 'Songs') && spotifyResults.tracks.length > 0 && (
-                <Section title="Tracks on Spotify">
+              {(tab === 'All' || tab === 'Songs') && filteredSpTracks.length > 0 && (
+                <Section title={`Tracks on Spotify${filteredSpTracks.length > SP_TRACKS_PER_PAGE ? ` (${filteredSpTracks.length})` : ''}`}>
                   <div className="space-y-2">
-                    {spotifyResults.tracks.map(t => (
+                    {pagedSpTracks.map(t => (
                       <div key={t.spotify_id} className="card p-3 flex items-center gap-4 hover:border-violet-700 transition-colors">
                         {t.cover_url ? (
                           <img src={t.cover_url} alt="" className="w-10 h-10 rounded object-cover shrink-0 ring-1 ring-white/25" loading="lazy" />
@@ -458,6 +522,7 @@ export default function Search() {
                       </div>
                     ))}
                   </div>
+                  <MiniPager page={spTrackPage} total={totalSpTrkPages} onPage={setSpTrackPage} />
                 </Section>
               )}
             </div>
@@ -465,9 +530,32 @@ export default function Search() {
         </>
       )}
 
-      {!spotifyLoading && spotifyResults !== null && !hasSpotify && localTotal === 0 && tab !== 'Users' && tab !== 'Lists' && (
+      {!spotifyLoading && spotifyResults !== null && !hasSpotifyContent && localTotal === 0 && tab !== 'Users' && tab !== 'Lists' && (
         <div className="text-center text-gray-500 py-12">No results found for "{q}"</div>
       )}
+    </div>
+  )
+}
+
+function MiniPager({ page, total, onPage }) {
+  if (total <= 1) return null
+  return (
+    <div className="flex items-center justify-center gap-2 pt-3">
+      <button
+        onClick={() => onPage(p => Math.max(1, p - 1))}
+        disabled={page === 1}
+        className="px-3 py-1.5 text-sm rounded-lg bg-gray-800 text-gray-300 hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+      >
+        ←
+      </button>
+      <span className="text-sm text-gray-400 tabular-nums">{page} / {total}</span>
+      <button
+        onClick={() => onPage(p => Math.min(total, p + 1))}
+        disabled={page === total}
+        className="px-3 py-1.5 text-sm rounded-lg bg-gray-800 text-gray-300 hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+      >
+        →
+      </button>
     </div>
   )
 }

@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy import func
 
 from .. import models
@@ -35,7 +35,7 @@ def my_stats(db: Session = Depends(get_db), current_user: models.User = Depends(
         .filter_by(user_id=uid).scalar()
     )
 
-    # Top genres from reviewed albums
+    # Top genres from reviewed albums — single batch query, no loop
     reviewed_album_ids = [
         r[0] for r in
         db.query(models.Review.album_id)
@@ -43,27 +43,38 @@ def my_stats(db: Session = Depends(get_db), current_user: models.User = Depends(
         .all()
     ]
     genre_counts: dict[str, int] = {}
-    for aid in reviewed_album_ids:
-        album = db.query(models.Album).get(aid)
-        if album:
+    if reviewed_album_ids:
+        for album in (
+            db.query(models.Album)
+            .options(selectinload(models.Album.genres))
+            .filter(models.Album.id.in_(reviewed_album_ids))
+            .all()
+        ):
             for g in album.genres:
                 genre_counts[g.name] = genre_counts.get(g.name, 0) + 1
 
     top_genres = sorted(genre_counts.items(), key=lambda x: x[1], reverse=True)[:5]
 
-    # Rating distribution (1–5 in 0.5 steps)
-    all_ratings = [
-        r[0] for r in db.query(models.Review.rating).filter_by(user_id=uid).all()
-    ]
-    distribution: dict[str, int] = {}
-    for r in all_ratings:
-        key = str(r)
-        distribution[key] = distribution.get(key, 0) + 1
+    # Rating distribution — aggregate in SQL, not Python
+    distribution: dict[str, int] = {
+        str(rating): cnt
+        for rating, cnt in
+        db.query(models.Review.rating, func.count(models.Review.id))
+        .filter(models.Review.user_id == uid)
+        .group_by(models.Review.rating)
+        .all()
+    }
 
-    # Recent reviews with target info
+    # Recent reviews with target info — eager-load all relationships
     recent = (
         db.query(models.Review)
-        .filter_by(user_id=uid)
+        .options(
+            joinedload(models.Review.user),
+            joinedload(models.Review.album).joinedload(models.Album.artist),
+            joinedload(models.Review.song).joinedload(models.Song.artist),
+            joinedload(models.Review.song).joinedload(models.Song.album),
+        )
+        .filter(models.Review.user_id == uid)
         .order_by(models.Review.created_at.desc())
         .limit(100).all()
     )
@@ -75,16 +86,16 @@ def my_stats(db: Session = Depends(get_db), current_user: models.User = Depends(
             row["target_cover"]  = r.album.cover_url
             row["target_type"]   = "album"
             row["target_id"]     = r.album_id
-            row["target_artist"] = r.album.artist.name
+            row["target_artist"] = r.album.artist.name if r.album.artist else None
         elif r.song:
             row["target_title"]  = r.song.title
             row["target_cover"]  = r.song.album.cover_url if r.song.album else None
             row["target_type"]   = "song"
             row["target_id"]     = r.song_id
-            row["target_artist"] = r.song.artist.name
+            row["target_artist"] = r.song.artist.name if r.song.artist else None
         recent_out.append(row)
 
-    # Audio profile — averages across listened songs with Spotify feature data
+    # Audio profile — use SQL AVG instead of loading all rows into Python
     listened_song_ids = [
         row[0] for row in
         db.query(models.UserSongStatus.song_id)
@@ -93,25 +104,32 @@ def my_stats(db: Session = Depends(get_db), current_user: models.User = Depends(
     ]
     audio_profile = None
     if listened_song_ids:
-        feature_songs = (
-            db.query(models.Song)
+        avgs_row = (
+            db.query(
+                func.avg(models.Song.energy).label("energy"),
+                func.avg(models.Song.danceability).label("danceability"),
+                func.avg(models.Song.valence).label("valence"),
+                func.avg(models.Song.acousticness).label("acousticness"),
+                func.avg(models.Song.instrumentalness).label("instrumentalness"),
+                func.avg(models.Song.tempo).label("tempo"),
+                func.count(models.Song.id).label("n"),
+            )
             .filter(
                 models.Song.id.in_(listened_song_ids),
                 models.Song.energy.isnot(None),
             )
-            .all()
+            .one()
         )
-        if feature_songs:
-            n = len(feature_songs)
+        if avgs_row.n:
             avgs = {
-                "energy":           round(sum(s.energy           or 0 for s in feature_songs) / n, 3),
-                "danceability":     round(sum(s.danceability     or 0 for s in feature_songs) / n, 3),
-                "valence":          round(sum(s.valence          or 0 for s in feature_songs) / n, 3),
-                "acousticness":     round(sum(s.acousticness     or 0 for s in feature_songs) / n, 3),
-                "instrumentalness": round(sum(s.instrumentalness or 0 for s in feature_songs) / n, 3),
-                "tempo":            round(sum(s.tempo            or 0 for s in feature_songs) / n, 1),
+                "energy":           round(float(avgs_row.energy), 3),
+                "danceability":     round(float(avgs_row.danceability), 3),
+                "valence":          round(float(avgs_row.valence), 3),
+                "acousticness":     round(float(avgs_row.acousticness), 3),
+                "instrumentalness": round(float(avgs_row.instrumentalness), 3),
+                "tempo":            round(float(avgs_row.tempo), 1),
             }
-            audio_profile = {"songs_with_features": n, **avgs, "personality": _compute_personality(avgs)}
+            audio_profile = {"songs_with_features": avgs_row.n, **avgs, "personality": _compute_personality(avgs)}
 
     return {
         "albums_listened":    albums_listened,
@@ -164,8 +182,15 @@ def postcard_stats(
         song_review_q = song_review_q.filter(models.Review.created_at >= cutoff)
     songs_listened = len({r[0] for r in song_status_q.all()} | {r[0] for r in song_review_q.all()})
 
-    # Reviews in period
-    rev_q = db.query(models.Review).filter_by(user_id=uid)
+    # Reviews in period — eager-load relationships used below
+    rev_q = (
+        db.query(models.Review)
+        .options(
+            joinedload(models.Review.song).joinedload(models.Song.artist),
+            joinedload(models.Review.album).joinedload(models.Album.artist),
+        )
+        .filter(models.Review.user_id == uid)
+    )
     if cutoff:
         rev_q = rev_q.filter(models.Review.created_at >= cutoff)
     reviews_in_period = rev_q.all()
@@ -209,15 +234,19 @@ def postcard_stats(
         if len(top_albums) == 3:
             break
 
-    # Top genres from listened albums in period
+    # Top genres from listened albums in period — batch query, no loop
     listened_aid_q = db.query(models.UserAlbumStatus.album_id).filter_by(user_id=uid, status="listened")
     if cutoff:
         listened_aid_q = listened_aid_q.filter(models.UserAlbumStatus.created_at >= cutoff)
     listened_aids = [row[0] for row in listened_aid_q.all()]
     genre_counts: dict[str, int] = {}
-    for aid in listened_aids:
-        album = db.query(models.Album).get(aid)
-        if album:
+    if listened_aids:
+        for album in (
+            db.query(models.Album)
+            .options(selectinload(models.Album.genres))
+            .filter(models.Album.id.in_(listened_aids))
+            .all()
+        ):
             for g in album.genres:
                 genre_counts[g.name] = genre_counts.get(g.name, 0) + 1
     top_genres = [
@@ -225,28 +254,34 @@ def postcard_stats(
         for n, c in sorted(genre_counts.items(), key=lambda x: x[1], reverse=True)[:5]
     ]
 
-    # Audio profile from listened songs in period
+    # Audio profile from listened songs — SQL AVG, no Python aggregation
     listened_sid_q = db.query(models.UserSongStatus.song_id).filter_by(user_id=uid, status="listened")
     if cutoff:
         listened_sid_q = listened_sid_q.filter(models.UserSongStatus.created_at >= cutoff)
     listened_sids = [row[0] for row in listened_sid_q.all()]
     audio_profile = None
     if listened_sids:
-        feature_songs = (
-            db.query(models.Song)
+        avgs_row = (
+            db.query(
+                func.avg(models.Song.energy).label("energy"),
+                func.avg(models.Song.danceability).label("danceability"),
+                func.avg(models.Song.valence).label("valence"),
+                func.avg(models.Song.acousticness).label("acousticness"),
+                func.avg(models.Song.instrumentalness).label("instrumentalness"),
+                func.count(models.Song.id).label("n"),
+            )
             .filter(models.Song.id.in_(listened_sids), models.Song.energy.isnot(None))
-            .all()
+            .one()
         )
-        if feature_songs:
-            n = len(feature_songs)
+        if avgs_row.n:
             avgs = {
-                "energy":           round(sum(s.energy           or 0 for s in feature_songs) / n, 3),
-                "danceability":     round(sum(s.danceability     or 0 for s in feature_songs) / n, 3),
-                "valence":          round(sum(s.valence          or 0 for s in feature_songs) / n, 3),
-                "acousticness":     round(sum(s.acousticness     or 0 for s in feature_songs) / n, 3),
-                "instrumentalness": round(sum(s.instrumentalness or 0 for s in feature_songs) / n, 3),
+                "energy":           round(float(avgs_row.energy), 3),
+                "danceability":     round(float(avgs_row.danceability), 3),
+                "valence":          round(float(avgs_row.valence), 3),
+                "acousticness":     round(float(avgs_row.acousticness), 3),
+                "instrumentalness": round(float(avgs_row.instrumentalness), 3),
             }
-            audio_profile = {"songs_with_features": n, **avgs, "personality": _compute_personality(avgs)}
+            audio_profile = {"songs_with_features": avgs_row.n, **avgs, "personality": _compute_personality(avgs)}
 
     return {
         "top_songs":  top_songs,

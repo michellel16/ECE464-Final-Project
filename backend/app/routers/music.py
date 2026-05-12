@@ -1214,6 +1214,7 @@ def get_album_reviews(
 ):
     rows = (
         db.query(models.Review)
+        .options(joinedload(models.Review.user))
         .filter(models.Review.album_id == album_id)
         .order_by(models.Review.created_at.desc())
         .offset(skip).limit(limit).all()
@@ -1264,6 +1265,7 @@ def get_song_reviews(
 ):
     rows = (
         db.query(models.Review)
+        .options(joinedload(models.Review.user))
         .filter(models.Review.song_id == song_id)
         .order_by(models.Review.created_at.desc())
         .offset(skip).limit(limit).all()

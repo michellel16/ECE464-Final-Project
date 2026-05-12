@@ -199,8 +199,21 @@ class List(Base):
     group_name  = Column(String(100), nullable=True)
     created_at  = Column(DateTime, default=datetime.utcnow)
 
-    user  = relationship("User",     back_populates="lists")
-    items = relationship("ListItem", back_populates="list", cascade="all, delete-orphan")
+    user    = relationship("User",       back_populates="lists")
+    items   = relationship("ListItem",   back_populates="list", cascade="all, delete-orphan")
+    members = relationship("ListMember", back_populates="list_", cascade="all, delete-orphan")
+
+
+class ListMember(Base):
+    __tablename__ = "list_members"
+    list_id  = Column(Integer, ForeignKey("lists.id",  ondelete="CASCADE"), primary_key=True)
+    user_id  = Column(Integer, ForeignKey("users.id",  ondelete="CASCADE"), primary_key=True)
+    role     = Column(String(20), nullable=False, default="viewer")   # viewer | editor
+    status   = Column(String(20), nullable=False, default="accepted") # pending | accepted
+    added_at = Column(DateTime, default=datetime.utcnow)
+
+    list_ = relationship("List", back_populates="members")
+    user  = relationship("User", backref="list_memberships")
 
 
 class ListItem(Base):

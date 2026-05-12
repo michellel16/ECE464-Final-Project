@@ -68,6 +68,12 @@ _GENRE_SPLIT_RULES: dict[str, list[str]] = {
     "jazz & blues": ["Jazz", "Blues"],
 }
 
+# Delete: lower-cased genre names that are not real genres and should be removed entirely
+_GENRE_DELETE: set[str] = {
+    "singer-songwriter",
+    "singer/songwriter",
+}
+
 
 def _do_fix_genres(db: Session) -> dict:
     """
@@ -113,9 +119,18 @@ def _do_fix_genres(db: Session) -> dict:
 
     merges_done = 0
     splits_done = 0
+    deletes_done = 0
 
     for genre in list(all_genres):
         lname = genre.name.lower()
+
+        # Delete blacklisted genres (no reassignment — just remove associations)
+        if lname in _GENRE_DELETE:
+            db.execute(text("DELETE FROM artist_genre WHERE genre_id = :id"), {"id": genre.id})
+            db.execute(text("DELETE FROM album_genre  WHERE genre_id = :id"), {"id": genre.id})
+            to_delete.add(genre.id)
+            deletes_done += 1
+            continue
 
         # Check split rules first
         if lname in _GENRE_SPLIT_RULES:
@@ -140,7 +155,7 @@ def _do_fix_genres(db: Session) -> dict:
             text(f"DELETE FROM genres WHERE id IN ({','.join(str(i) for i in to_delete)})")
         )
     db.commit()
-    return {"merges": merges_done, "splits": splits_done, "removed": len(to_delete)}
+    return {"merges": merges_done, "splits": splits_done, "removed": len(to_delete) - deletes_done, "deleted": deletes_done}
 
 # Known genre mappings for seed data — used to repair missing associations
 _SEED_ARTIST_GENRES: dict[str, list[str]] = {

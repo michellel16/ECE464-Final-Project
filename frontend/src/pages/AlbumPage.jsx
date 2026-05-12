@@ -23,8 +23,6 @@ export default function AlbumPage() {
   const [showForm, setShowForm] = useState(false)
   const [loading, setLoading]   = useState(true)
   const [saving, setSaving]     = useState(false)
-  const [addingList, setAddingList] = useState(false)
-  const [myLists, setMyLists]   = useState([])
   const [playingId, setPlayingId] = useState(null)
   const [showRecommend, setShowRecommend] = useState(false)
   const audioRef = useRef(null)
@@ -37,9 +35,8 @@ export default function AlbumPage() {
     if (user) {
       fetches.push(axios.get(`/api/music/albums/${id}/my-review`))
       fetches.push(axios.get(`/api/music/albums/${id}/status`))
-      fetches.push(axios.get('/api/lists/me'))
     }
-    Promise.all(fetches).then(([albumRes, reviewsRes, myRevRes, statusRes, listsRes]) => {
+    Promise.all(fetches).then(([albumRes, reviewsRes, myRevRes, statusRes]) => {
       setAlbum(albumRes.data)
       setReviews(reviewsRes.data)
       if (myRevRes) {
@@ -47,7 +44,6 @@ export default function AlbumPage() {
         if (myRevRes.data.review) setDraft({ rating: myRevRes.data.review.rating, text: myRevRes.data.review.text ?? '' })
       }
       if (statusRes) setMyStatus(statusRes.data.status)
-      if (listsRes) setMyLists(listsRes.data)
     }).finally(() => setLoading(false))
   }, [id, user])
 
@@ -84,10 +80,6 @@ export default function AlbumPage() {
     }
   }
 
-  async function addToList(listId) {
-    await axios.post(`/api/lists/${listId}/items`, { album_id: parseInt(id) })
-    setAddingList(false)
-  }
 
   function playPreview(songId, previewUrl) {
     if (playingId === songId) {
@@ -170,27 +162,6 @@ export default function AlbumPage() {
               >
                 ↗ Recommend
               </button>
-              <div className="relative">
-                <button
-                  onClick={() => setAddingList(!addingList)}
-                  className="px-3 py-1 rounded text-xs font-medium border border-[#2a2a45] text-gray-300 hover:border-violet-600 hover:text-violet-300 transition-colors"
-                >
-                  + Add to List
-                </button>
-                {addingList && myLists.length > 0 && (
-                  <div className="absolute left-0 top-full mt-1 w-52 bg-[#111127] border border-[#252540] rounded shadow-xl py-1 z-10">
-                    {myLists.map(l => (
-                      <button
-                        key={l.id}
-                        onClick={() => addToList(l.id)}
-                        className="w-full text-left px-4 py-2 text-xs text-gray-300 hover:bg-[#1a1a2e] hover:text-white"
-                      >
-                        {l.name}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
             </div>
           )}
         </div>

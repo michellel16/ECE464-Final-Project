@@ -1,19 +1,42 @@
 """
 Vector-based personalized music recommendations.
 
-Algorithm
----------
-1. Cached taste embedding (zero-latency, no network): if the user's stored
-   taste embedding matches the current profile fingerprint, run ANN immediately.
+Algorithm — four-path cascade
+------------------------------
+1. Cached taste embedding  (zero-latency, no network call):
+   If the user's stored `taste_embedding` matches the current profile
+   fingerprint (sha-256 of all interactions), we run an ANN query against
+   the pgvector HNSW index immediately.  When the profile changes, a
+   background task regenerates the embedding so the *next* request lands
+   here again.
 
-2. Weighted centroid of stored item embeddings: average the pgvector embeddings
-   of items the user has rated/favourited, then run ANN. No external calls.
+2. Weighted centroid of stored item embeddings  (no external calls):
+   Compute a weighted average of the pgvector vectors already stored on the
+   albums/songs the user has interacted with.  Weight = rating / 5 for
+   reviews; 0.9 for favorited, 0.6 for listened statuses.  The centroid is
+   L2-normalised so cosine distance queries work correctly.
 
-3. Community top-rated: fallback when the user has < 2 interactions.
+3. Per-interest preference clusters  (background-fetched, cache-only hot path):
+   Each stated genre/mood/free-text preference is embedded separately.
+   Results from every cluster are round-robin merged for diversity.
+   The preference embeddings are fetched in a background task and cached
+   in-process; the hot path reads from the cache without any network call.
 
-When the taste embedding is stale or missing, a background task is enqueued to
-call OpenAI and update the cache — so the next request can use path 1. This
-keeps OpenAI rate limits entirely out of the hot request path.
+4. Community top-rated  (no embeddings needed):
+   Fallback for brand-new users with no listening history and no cached
+   preference embeddings yet.
+
+When paths 1/2 have preference vectors available they are combined with the
+listening-history vector via round-robin merge so the result reflects both
+what the user has *actually* listened to and what they *say* they like.
+
+pgvector notes
+--------------
+- Operator `<=>` is cosine distance (0 = identical, 2 = opposite).
+- Similarity = 1 − cosine_distance, so 1.0 is a perfect match.
+- The HNSW index on each embeddings column makes ANN queries O(log n).
+- A minimum similarity threshold of MIN_SIMILARITY filters out noise while
+  the fallback path guarantees the endpoint always returns results.
 """
 import hashlib
 import json
@@ -33,6 +56,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/recommendations", tags=["recommendations"])
 
 _MIN_PROFILE_SIZE = 2
+
+# Cosine-similarity floor: items with similarity below this are too distant
+# from the user's taste vector to surface.  The fallback path ignores this
+# threshold since it doesn't use embeddings.
+MIN_SIMILARITY = 0.45
 
 # In-process cache: embedding text → vector (stable across requests, cleared on restart)
 _pref_embedding_cache: dict[str, list[float]] = {}
@@ -70,24 +98,57 @@ def _profile_fingerprint(reviews, album_statuses, song_statuses, preferences: di
 
 
 def _build_taste_text(reviews, album_statuses, song_statuses, preferences: dict | None = None) -> str:
+    """
+    Construct a rich natural-language description of the user's music taste.
+    This text is embedded by OpenAI and stored as the taste_embedding vector.
+    The richer the text, the more semantically precise the ANN queries.
+
+    Signal hierarchy (highest weight first):
+      1. Highly-rated reviews (rating >= 4.0)
+      2. Favorited albums / songs
+      3. Audio-feature descriptors from listened songs (Spotify features)
+      4. Genre distribution across liked items
+      5. Explicit preferences (genres, moods, free-text)
+    """
     parts = ["Music taste profile:"]
 
+    # Top-rated reviews — sorted by rating descending, cap at 12
     for rev in sorted(reviews, key=lambda r: -(r.rating or 0))[:12]:
         if rev.album and getattr(rev.album, "artist", None):
             parts.append(f"Rated {rev.album.title} by {rev.album.artist.name} {rev.rating}/5")
         elif rev.song and getattr(rev.song, "artist", None):
             parts.append(f"Rated {rev.song.title} by {rev.song.artist.name} {rev.rating}/5")
 
+    # Favorited albums
     for st in album_statuses:
         if st.status == "favorites" and st.album:
             a = getattr(st.album, "artist", None)
             parts.append(f"Favorited album {st.album.title}" + (f" by {a.name}" if a else ""))
 
+    # Favorited songs + audio-feature descriptors
     for st in song_statuses:
         if st.status == "favorites" and st.song:
-            a = getattr(st.song, "artist", None)
-            parts.append(f"Favorited song {st.song.title}" + (f" by {a.name}" if a else ""))
+            a    = getattr(st.song, "artist", None)
+            base = f"Favorited song {st.song.title}" + (f" by {a.name}" if a else "")
+            # Translate numeric Spotify audio features into adjectives so the
+            # embedding captures *how* the music sounds, not just what it is.
+            descriptors = []
+            song = st.song
+            if getattr(song, "energy", None) is not None:
+                if song.energy > 0.75:   descriptors.append("high-energy")
+                elif song.energy < 0.3:  descriptors.append("low-energy")
+            if getattr(song, "valence", None) is not None:
+                if song.valence > 0.7:   descriptors.append("upbeat")
+                elif song.valence < 0.3: descriptors.append("melancholic")
+            if getattr(song, "danceability", None) is not None and song.danceability > 0.7:
+                descriptors.append("danceable")
+            if getattr(song, "acousticness", None) is not None and song.acousticness > 0.7:
+                descriptors.append("acoustic")
+            if descriptors:
+                base += f" ({', '.join(descriptors)})"
+            parts.append(base)
 
+    # Genre distribution from items rated >= 4.0
     genre_counts: dict[str, int] = {}
     for rev in reviews:
         if (rev.rating or 0) >= 4.0:
@@ -102,6 +163,7 @@ def _build_taste_text(reviews, album_statuses, song_statuses, preferences: dict 
     if top_genres:
         parts.append(f"Preferred genres: {', '.join(top_genres)}")
 
+    # Explicit user preferences (highest signal when present)
     if preferences:
         if genres := preferences.get('genres', []):
             parts.append(f"Stated favorite genres: {', '.join(genres)}")
@@ -209,9 +271,20 @@ def _vector_recs(
     album_limit: int,
     song_limit: int,
 ) -> tuple[list[dict], list[dict]]:
+    """
+    Run two ANN queries (albums + songs) against the pgvector HNSW index using
+    cosine distance.  Results below MIN_SIMILARITY are filtered out so the
+    caller never surfaces low-confidence matches.
+
+    We over-fetch by 2× then apply the threshold filter, ensuring the final
+    list can fill `album_limit` / `song_limit` even when some rows are pruned.
+    """
     vec = _vec_literal(centroid)
     excl_albums = list(seen_album_ids) or [-1]
     excl_songs  = list(seen_song_ids)  or [-1]
+    # Over-fetch to compensate for threshold pruning
+    fetch_albums = album_limit * 2 + 4
+    fetch_songs  = song_limit  * 2 + 4
 
     album_rows = db.execute(
         text("""
@@ -226,7 +299,7 @@ def _vector_recs(
             ORDER BY al.embedding <=> :emb::vector
             LIMIT :lim
         """),
-        {"emb": vec, "excl_albums": excl_albums, "lim": album_limit},
+        {"emb": vec, "excl_albums": excl_albums, "lim": fetch_albums},
     ).fetchall()
 
     song_rows = db.execute(
@@ -246,7 +319,7 @@ def _vector_recs(
             ORDER BY s.embedding <=> :emb::vector
             LIMIT :lim
         """),
-        {"emb": vec, "excl_songs": excl_songs, "lim": song_limit},
+        {"emb": vec, "excl_songs": excl_songs, "lim": fetch_songs},
     ).fetchall()
 
     albums = [
@@ -258,7 +331,9 @@ def _vector_recs(
             "reason": _similarity_reason(float(r.similarity)),
         }
         for r in album_rows
-    ]
+        if float(r.similarity) >= MIN_SIMILARITY
+    ][:album_limit]
+
     songs = [
         {
             "id": r.id, "title": r.title,
@@ -268,7 +343,9 @@ def _vector_recs(
             "reason": _similarity_reason(float(r.similarity)),
         }
         for r in song_rows
-    ]
+        if float(r.similarity) >= MIN_SIMILARITY
+    ][:song_limit]
+
     return albums, songs
 
 
@@ -384,6 +461,12 @@ async def my_recommendations(
         .all()
     )
 
+    # Count how many catalogue items have embeddings (diagnostic / UI metadata)
+    from sqlalchemy import func as _func
+    album_embedding_count = db.query(_func.count(models.Album.id)).filter(models.Album.embedding.isnot(None)).scalar() or 0
+    song_embedding_count  = db.query(_func.count(models.Song.id)).filter(models.Song.embedding.isnot(None)).scalar() or 0
+    embedding_count = album_embedding_count + song_embedding_count
+
     # ── Build "seen" exclusion sets ────────────────────────────────────────────
     seen_album_ids: set[int] = set()
     seen_song_ids: set[int] = set()
@@ -466,6 +549,15 @@ async def my_recommendations(
             if taste_text != "Music taste profile:" and uid not in _taste_bg_inflight:
                 background_tasks.add_task(_refresh_taste_embedding_bg, uid, taste_text, fp)
 
+    def _resp(albums, songs, src):
+        return {
+            "albums": albums,
+            "songs": songs,
+            "source": src,
+            "profile_size": profile_size,
+            "embedding_count": embedding_count,
+        }
+
     if taste_vec:
         all_vecs = [taste_vec] + pref_vecs
         if len(all_vecs) >= 2:
@@ -473,7 +565,14 @@ async def my_recommendations(
         else:
             albums, songs = _vector_recs(db, taste_vec, seen_album_ids, seen_song_ids, album_limit, song_limit)
             src = "embedding"
-        return {"albums": albums, "songs": songs, "source": src, "profile_size": profile_size}
+        # If the similarity threshold pruned too aggressively, pad with fallback
+        if len(albums) < album_limit // 2 or len(songs) < song_limit // 2:
+            fb_albums, fb_songs = _fallback_recs(db, seen_album_ids | {a["id"] for a in albums},
+                                                  seen_song_ids  | {s["id"] for s in songs},
+                                                  album_limit - len(albums), song_limit - len(songs))
+            albums = albums + fb_albums
+            songs  = songs  + fb_songs
+        return _resp(albums, songs, src)
 
     # ── Weighted centroid from item embeddings ────────────────────────────────
     if profile_size >= _MIN_PROFILE_SIZE:
@@ -506,7 +605,7 @@ async def my_recommendations(
                 else:
                     albums, songs = _vector_recs(db, centroid, seen_album_ids, seen_song_ids, album_limit, song_limit)
                     src = "centroid"
-                return {"albums": albums, "songs": songs, "source": src, "profile_size": profile_size}
+                return _resp(albums, songs, src)
 
     # ── Preferences-only path (no listening history yet) ─────────────────────
     if pref_vecs:
@@ -515,8 +614,8 @@ async def my_recommendations(
         else:
             albums, songs = _vector_recs(db, pref_vecs[0], seen_album_ids, seen_song_ids, album_limit, song_limit)
             src = "preferences"
-        return {"albums": albums, "songs": songs, "source": src, "profile_size": profile_size}
+        return _resp(albums, songs, src)
 
     # ── Community top-rated fallback ──────────────────────────────────────────
     albums, songs = _fallback_recs(db, seen_album_ids, seen_song_ids, album_limit, song_limit)
-    return {"albums": albums, "songs": songs, "source": "fallback", "profile_size": profile_size}
+    return _resp(albums, songs, "fallback")

@@ -287,6 +287,8 @@ function NotifRow({ n, onClose }) {
     follow_request: '🔔',
     review_like:    '❤️',
     recommendation: '🎵',
+    list_invite:     '📋',
+    list_role_update:'📋',
   }
 
   function label() {
@@ -294,6 +296,11 @@ function NotifRow({ n, onClose }) {
     if (n.type === 'new_follower')   return <><span className="text-violet-400">{who}</span> started following you</>
     if (n.type === 'follow_request') return <><span className="text-violet-400">{who}</span> wants to follow you</>
     if (n.type === 'review_like')    return <><span className="text-violet-400">{who}</span> liked your review</>
+    if (n.type === 'list_invite')    return <><span className="text-violet-400">{who}</span> invited you to collaborate on a list</>
+    if (n.type === 'list_role_update') {
+      const role = n.entity_type
+      return <><span className="text-violet-400">{who}</span> updated your access to <span className={role === 'editor' ? 'text-green-400' : 'text-gray-300'}>{role}</span></>
+    }
     if (n.type === 'recommendation') {
       const item = n.song ?? n.album
       return <><span className="text-violet-400">{who}</span> recommended {item ? <span className="text-white">{item.title}</span> : 'something'}</>
@@ -310,6 +317,9 @@ function NotifRow({ n, onClose }) {
         return `/${n.review_target.type === 'album' ? 'albums' : 'songs'}/${n.review_target.id}`
       }
       return null
+    }
+    if (n.type === 'list_invite' || n.type === 'list_role_update') {
+      return '/lists?tab=collab'
     }
     if (n.type === 'recommendation') {
       return user?.username ? `/users/${user.username}?tab=recs` : null

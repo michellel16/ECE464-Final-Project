@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from .seed import seed_database, seed_extra_data, seed_activity_boost
+from .seed import seed_database, seed_extra_data, seed_activity_boost, seed_rich_demo_data, seed_critical_reviews, seed_song_reviews
 from .routers import auth, users, music, lists, social, search, stats, spotify, recommendations, charts, notifications
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -117,13 +117,27 @@ async def _startup_tasks():
         print(f"Activity boost skipped: {e}")
 
     try:
+        seed_rich_demo_data()
+    except Exception as e:
+        print(f"Rich demo seed skipped: {e}")
+
+    try:
+        seed_critical_reviews()
+    except Exception as e:
+        print(f"Critical reviews skipped: {e}")
+
+    try:
+        seed_song_reviews()
+    except Exception as e:
+        print(f"Song reviews skipped: {e}")
+
+    try:
         from .routers.charts import _do_propagate_genres, _do_cleanup_genres
         _db = SessionLocal()
         try:
-            already = _db.execute(text("SELECT 1 FROM artist_genre LIMIT 1")).fetchone()
-            if not already:
-                prop = _do_propagate_genres(_db)
-                removed = _do_cleanup_genres(_db)
+            prop = _do_propagate_genres(_db)
+            removed = _do_cleanup_genres(_db)
+            if prop["artists_tagged"] or prop["albums_tagged"] or removed:
                 print(f"[startup] Genres: tagged {prop['artists_tagged']} artist(s), {prop['albums_tagged']} album(s); removed {removed} unused genre(s)")
         finally:
             _db.close()
@@ -135,12 +149,33 @@ async def _startup_tasks():
         _db = SessionLocal()
         try:
             result = _do_fix_genres(_db)
-            if result["removed"]:
-                print(f"[startup] Genre fix: {result['merges']} merged, {result['splits']} split, {result['removed']} removed")
+            if result["removed"] or result.get("deleted"):
+                print(f"[startup] Genre fix: {result['merges']} merged, {result['splits']} split, {result['removed']} removed, {result.get('deleted', 0)} deleted")
         finally:
             _db.close()
     except Exception as e:
         print(f"[startup] Genre fix skipped: {e}")
+
+    try:
+        from .routers.spotify import _musicbrainz_backfill, _mb_progress
+        _db = SessionLocal()
+        try:
+            untagged = [
+                row[0] for row in _db.execute(text("""
+                    SELECT id FROM artists
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM artist_genre WHERE artist_genre.artist_id = artists.id
+                    )
+                """)).fetchall()
+            ]
+            if untagged and not _mb_progress["running"]:
+                import asyncio
+                asyncio.create_task(_musicbrainz_backfill(untagged))
+                print(f"[startup] MusicBrainz: queuing {len(untagged)} untagged artist(s)")
+        finally:
+            _db.close()
+    except Exception as e:
+        print(f"[startup] MusicBrainz backfill skipped: {e}")
 
     await _backfill_images()
 

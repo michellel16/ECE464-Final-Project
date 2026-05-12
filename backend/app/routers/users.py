@@ -348,6 +348,34 @@ def follow_status(
     return {"following": following, "requested": requested}
 
 
+@router.get("/me/following")
+def get_following(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """Users the current user follows."""
+    following_ids = [f.followed_id for f in current_user.following]
+    if not following_ids:
+        return []
+    users = db.query(models.User).filter(models.User.id.in_(following_ids)).all()
+    return [{"username": u.username, "avatar_url": u.avatar_url} for u in users]
+
+
+@router.get("/me/mutual-follows")
+def get_mutual_follows(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """Users who both follow me and I follow (mutual)."""
+    following_ids = {f.followed_id for f in current_user.following}
+    follower_ids  = {f.follower_id  for f in current_user.followers}
+    mutual_ids    = following_ids & follower_ids
+    if not mutual_ids:
+        return []
+    users = db.query(models.User).filter(models.User.id.in_(mutual_ids)).all()
+    return [{"username": u.username, "avatar_url": u.avatar_url} for u in users]
+
+
 @router.get("/me/follow-requests")
 def get_follow_requests(
     db: Session = Depends(get_db),

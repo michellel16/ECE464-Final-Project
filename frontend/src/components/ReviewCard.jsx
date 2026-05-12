@@ -30,8 +30,13 @@ export default function ReviewCard({ review: initial }) {
     }
   }
 
+  const isLinked = typeof window !== 'undefined' && window.location.hash === `#review-${initial.id}`
+
   return (
-    <div className="card p-4 space-y-2">
+    <div
+      id={`review-${initial.id}`}
+      className={`card p-4 space-y-2 scroll-mt-24 transition-shadow ${isLinked ? 'ring-2 ring-violet-500/50' : ''}`}
+    >
       <div className="flex items-center justify-between">
         <Link to={`/users/${initial.username}`} className="flex items-center gap-2">
           <Avatar username={initial.username} avatarUrl={initial.avatar_url} size={7} />

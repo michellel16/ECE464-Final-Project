@@ -560,6 +560,9 @@ async def import_track(
     if sp_artist_full:
         _sync_artist_genres(artist, sp_artist_full.get("genres", []), db)
 
+    # Remember whether we still need a MusicBrainz lookup (Spotify returned no genres)
+    needs_mb_lookup = not artist.genres
+
     # Resolve album
     sp_album = track.get("album", {})
     album = db.query(models.Album).filter(models.Album.spotify_id == sp_album.get("id")).first()
@@ -620,6 +623,10 @@ async def import_track(
     asyncio.create_task(reembed_artist_bg(artist.id))
     if album:
         asyncio.create_task(reembed_album_bg(album.id))
+
+    # If Spotify had no genres for this artist, fall back to MusicBrainz
+    if needs_mb_lookup:
+        asyncio.create_task(_musicbrainz_backfill([artist.id]))
 
     return {"song_id": song.id, "already_existed": False}
 
@@ -1141,6 +1148,14 @@ async def import_album(
 
     existing = db.query(models.Album).filter(models.Album.spotify_id == spotify_album_id).first()
     if existing:
+        if existing.artist_id:
+            from sqlalchemy import text as _text
+            untagged = not db.execute(
+                _text("SELECT 1 FROM artist_genre WHERE artist_id = :aid LIMIT 1"),
+                {"aid": existing.artist_id},
+            ).fetchone()
+            if untagged:
+                asyncio.create_task(_musicbrainz_backfill([existing.artist_id]))
         return {
             "album_id":       existing.id,
             "song_count":     len(existing.songs),
@@ -1211,6 +1226,8 @@ async def import_album(
 
     if sp_art_full:
         _sync_artist_genres(artist, sp_art_full.get("genres", []), db)
+
+    needs_mb_lookup = not artist.genres
 
     # ── Create album ──
     images       = sp_album.get("images") or []
@@ -1284,6 +1301,9 @@ async def import_album(
     song_ids = [s.id for s in db.query(models.Song.id).filter(models.Song.album_id == album.id).all()]
     for sid in song_ids:
         asyncio.create_task(reembed_song_bg(sid))
+
+    if needs_mb_lookup:
+        asyncio.create_task(_musicbrainz_backfill([artist.id]))
 
     return {
         "album_id":        album.id,
@@ -1359,6 +1379,7 @@ async def import_artist(
 
     # ── Save genres from Spotify ──
     _sync_artist_genres(artist, sp_artist.get("genres", []), db)
+    needs_mb_lookup = not artist.genres
 
     # ── Import each album ──
     albums_imported = 0
@@ -1444,5 +1465,8 @@ async def import_artist(
     song_ids = [s.id for s in db.query(models.Song.id).filter(models.Song.artist_id == artist.id).all()]
     for sid in song_ids:
         asyncio.create_task(reembed_song_bg(sid))
+
+    if needs_mb_lookup:
+        asyncio.create_task(_musicbrainz_backfill([artist.id]))
 
     return {"artist_id": artist.id, "albums_imported": albums_imported}

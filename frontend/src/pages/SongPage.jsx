@@ -282,13 +282,20 @@ function formatDuration(sec) {
 
 function AddToListModal({ songId, onClose }) {
   const [lists, setLists]         = useState([])
+  const [editorLists, setEditorLists] = useState([])
   const [creating, setCreating]   = useState(false)
   const [newName, setNewName]     = useState('')
   const [feedback, setFeedback]   = useState('')
   const [saving, setSaving]       = useState(false)
 
   useEffect(() => {
-    axios.get('/api/lists/me').then(r => setLists(r.data)).catch(() => {})
+    Promise.all([
+      axios.get('/api/lists/me'),
+      axios.get('/api/lists/collab'),
+    ]).then(([myRes, collabRes]) => {
+      setLists(myRes.data)
+      setEditorLists(collabRes.data.filter(l => l.viewer_role === 'editor'))
+    }).catch(() => {})
   }, [])
 
   async function addToList(listId) {
@@ -332,19 +339,43 @@ function AddToListModal({ songId, onClose }) {
           <p className="text-center text-violet-400 py-2">{feedback}</p>
         ) : (
           <>
-            {lists.length > 0 && (
-              <div className="space-y-1 max-h-48 overflow-y-auto">
-                {lists.map(l => (
-                  <button
-                    key={l.id}
-                    disabled={saving}
-                    onClick={() => addToList(l.id)}
-                    className="w-full text-left px-3 py-2 rounded-lg text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors"
-                  >
-                    {l.name}
-                    <span className="text-gray-600 ml-2 text-xs">{l.item_count} items</span>
-                  </button>
-                ))}
+            {(lists.length > 0 || editorLists.length > 0) && (
+              <div className="space-y-1 max-h-56 overflow-y-auto">
+                {lists.length > 0 && (
+                  <>
+                    {editorLists.length > 0 && (
+                      <p className="text-[10px] text-gray-600 uppercase tracking-wider px-1 pb-0.5">My Lists</p>
+                    )}
+                    {lists.map(l => (
+                      <button
+                        key={l.id}
+                        disabled={saving}
+                        onClick={() => addToList(l.id)}
+                        className="w-full text-left px-3 py-2 rounded-lg text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors"
+                      >
+                        {l.name}
+                        <span className="text-gray-600 ml-2 text-xs">{l.item_count} items</span>
+                      </button>
+                    ))}
+                  </>
+                )}
+                {editorLists.length > 0 && (
+                  <>
+                    <p className="text-[10px] text-gray-600 uppercase tracking-wider px-1 pt-1 pb-0.5">Shared with Me</p>
+                    {editorLists.map(l => (
+                      <button
+                        key={l.id}
+                        disabled={saving}
+                        onClick={() => addToList(l.id)}
+                        className="w-full text-left px-3 py-2 rounded-lg text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors"
+                      >
+                        <span>{l.name}</span>
+                        <span className="text-gray-500 ml-1 text-xs">by {l.owner_username}</span>
+                        <span className="text-gray-600 ml-2 text-xs">{l.item_count} items</span>
+                      </button>
+                    ))}
+                  </>
+                )}
               </div>
             )}
 

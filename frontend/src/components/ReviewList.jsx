@@ -16,6 +16,23 @@ export default function ReviewList({ reviews }) {
   const [onlyText, setOnlyText] = useState(false)
   const [query, setQuery]       = useState('')
   const [page, setPage]         = useState(1)
+  const [scrolled, setScrolled] = useState(false)
+
+  // When reviews load in, jump to the page containing the linked review and scroll to it
+  useEffect(() => {
+    if (scrolled || reviews.length === 0) return
+    const m = window.location.hash.match(/^#review-(\d+)$/)
+    if (!m) return
+    const targetId = Number(m[1])
+    const sorted = [...reviews].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+    const idx = sorted.findIndex(r => r.id === targetId)
+    if (idx === -1) return
+    setPage(Math.ceil((idx + 1) / REVIEWS_PER_PAGE))
+    setScrolled(true)
+    setTimeout(() => {
+      document.getElementById(`review-${targetId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 120)
+  }, [reviews, scrolled])
 
   const filtered = useMemo(() => {
     let list = onlyText ? reviews.filter(r => r.text?.trim()) : [...reviews]
