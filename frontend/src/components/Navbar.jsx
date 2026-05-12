@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import axios from 'axios'
 import { useAuth } from '../contexts/AuthContext'
+import { staticUrl } from '../utils'
 
 const HISTORY_KEY = 'tunelog_search_history'
 const HISTORY_LIMIT = 8
@@ -364,7 +365,7 @@ export function Avatar({ username, avatarUrl = null, size = 8, className = '' })
   if (avatarUrl) {
     return (
       <img
-        src={avatarUrl}
+        src={staticUrl(avatarUrl)}
         alt={username}
         style={{ width: px, height: px }}
         className={`rounded-full object-cover shrink-0 ${className}`}

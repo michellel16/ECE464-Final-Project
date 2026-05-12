@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { Avatar } from '../components/Navbar'
 import StarRating from '../components/StarRating'
 import { supabase } from '../lib/supabase'
+import { staticUrl } from '../utils'
 
 export default function Profile() {
   const { username } = useParams()
@@ -134,7 +135,7 @@ export default function Profile() {
         {/* Banner */}
         <div className="relative h-36 sm:h-44 bg-gradient-to-br from-pink-950 via-violet-950 to-gray-900 shrink-0">
           {profile.banner_url && (
-            <img src={profile.banner_url} alt="" className="w-full h-full object-cover" />
+            <img src={staticUrl(profile.banner_url)} alt="" className="w-full h-full object-cover" />
           )}
         </div>
 
@@ -1338,7 +1339,7 @@ function EditProfileModal({ profile, onClose, onSaved }) {
               title="Change banner"
             >
               {bannerPreview && (
-                <img src={bannerPreview} alt="banner" className="w-full h-full object-cover" />
+                <img src={staticUrl(bannerPreview)} alt="banner" className="w-full h-full object-cover" />
               )}
               <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                 {bannerUploading ? (
@@ -1378,7 +1379,7 @@ function EditProfileModal({ profile, onClose, onSaved }) {
               title="Change profile picture"
             >
               {avatarPreview ? (
-                <img src={avatarPreview} alt="avatar" className="w-20 h-20 rounded-full object-cover ring-2 ring-violet-700/50" />
+                <img src={staticUrl(avatarPreview)} alt="avatar" className="w-20 h-20 rounded-full object-cover ring-2 ring-violet-700/50" />
               ) : (
                 <Avatar username={username} size={20} />
               )}
