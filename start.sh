@@ -1,12 +1,9 @@
 #!/bin/bash
-echo "Waiting for database to be ready..."
-sleep 5
-
 echo "Running migrations..."
-for i in $(seq 1 20); do
+for i in 1 2 3 4 5; do
     uv run alembic upgrade head && break
-    echo "Migration attempt $i failed, retrying in 10s..."
-    sleep 10
+    echo "Migration attempt $i failed, retrying in 5s..."
+    sleep 5
 done
 
 echo "Starting server..."
