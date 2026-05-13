@@ -1230,32 +1230,30 @@ def recommended_songs(
 
 @router.get("/songs/{song_id}")
 def get_song(song_id: int, db: Session = Depends(get_db)):
-    row = (
+    s = (
+        db.query(models.Song)
+        .options(joinedload(models.Song.artist), joinedload(models.Song.album))
+        .filter(models.Song.id == song_id)
+        .first()
+    )
+    if not s:
+        raise HTTPException(status_code=404, detail="Song not found")
+    stats = (
         db.query(
-            models.Song,
             func.avg(models.Review.rating).label("avg_rating"),
             func.count(models.Review.id).label("review_count"),
         )
-        .options(
-            joinedload(models.Song.artist),
-            joinedload(models.Song.album),
-        )
-        .outerjoin(models.Review, models.Review.song_id == models.Song.id)
-        .filter(models.Song.id == song_id)
-        .group_by(models.Song.id)
+        .filter(models.Review.song_id == song_id)
         .first()
     )
-    if not row:
-        raise HTTPException(status_code=404, detail="Song not found")
-    s, avg_rating, review_count = row
     return {
         "id": s.id, "title": s.title, "artist_id": s.artist_id,
         "artist": {"id": s.artist.id, "name": s.artist.name, "image_url": s.artist.image_url},
         "album_id": s.album_id,
         "album": {"id": s.album.id, "title": s.album.title, "cover_url": s.album.cover_url} if s.album else None,
         "duration_seconds": s.duration_seconds, "track_number": s.track_number,
-        "average_rating": round(float(avg_rating), 2) if avg_rating else None,
-        "review_count": review_count or 0,
+        "average_rating": round(float(stats.avg_rating), 2) if stats.avg_rating else None,
+        "review_count": stats.review_count or 0,
         "spotify_id": s.spotify_id,
         "spotify_preview_url": s.spotify_preview_url,
         "danceability": s.danceability, "energy": s.energy, "valence": s.valence,
