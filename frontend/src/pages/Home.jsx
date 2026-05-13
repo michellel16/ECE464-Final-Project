@@ -12,6 +12,7 @@ export default function Home() {
   const [songs, setSongs]                       = useState([])
   const [feed, setFeed]                         = useState([])
   const [recommended, setRecommended]           = useState([])
+  const [recommendedAlbums, setRecAlbums]       = useState([])
   const [recommendedArtists, setRecArtists]     = useState([])
   const [recentAlbums, setRecentAlbums]         = useState([])
   const [recentSongs, setRecentSongs]           = useState([])
@@ -54,8 +55,8 @@ export default function Home() {
       axios.get(`/api/users/${user.username}/activity?limit=60&days=21`)
         .then(r => setFeed(r.data))
         .catch(() => {})
-      axios.get('/api/music/recommended?song_limit=8')
-        .then(r => { setRecommended(r.data.songs); setRecArtists(r.data.artists) })
+      axios.get('/api/music/recommended?song_limit=8&album_limit=6')
+        .then(r => { setRecommended(r.data.songs); setRecArtists(r.data.artists); setRecAlbums(r.data.albums || []) })
         .catch(() => {})
       axios.get('/api/users/suggested?limit=5')
         .then(r => setSuggested(r.data))
@@ -155,6 +156,19 @@ export default function Home() {
           </div>
           <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-4">
             {recommendedArtists.map(a => <RecommendedArtistCard key={a.id} artist={a} />)}
+          </div>
+        </section>
+      )}
+
+      {/* Recommended Albums */}
+      {user && recommendedAlbums.length > 0 && (
+        <section>
+          <div className="mb-5">
+            <h2 className="text-xl font-bold text-white">Recommended Albums</h2>
+            <p className="text-gray-500 text-sm mt-0.5">Albums you might enjoy based on your taste and interests</p>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
+            {recommendedAlbums.map(a => <ForYouAlbumCard key={a.id} album={a} />)}
           </div>
         </section>
       )}

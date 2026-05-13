@@ -693,7 +693,7 @@ def seed_extra_data():
     """Add more artists, users, reviews, likes, and lists to an existing database."""
     db = SessionLocal()
     try:
-        if db.query(models.Artist).filter(models.Artist.name == "BeyoncÃ©").first():
+        if db.query(models.Artist).filter(models.Artist.name == "The Weeknd").first():
             return  # Already ran
 
         # â”€â”€ Extra genres â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -708,8 +708,8 @@ def seed_extra_data():
         # â”€â”€ New artists â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         new_artists_seed = [
             {
-                "name": "BeyoncÃ©",
-                "bio": "BeyoncÃ© Giselle Knowles-Carter is an American singer, songwriter, and actress. Regarded as one of the greatest entertainers of her generation, she has won more Grammy Awards than any other artist.",
+                "name": "Beyoncé",
+                "bio": "Beyoncé Giselle Knowles-Carter is an American singer, songwriter, and actress. Regarded as one of the greatest entertainers of her generation, she has won more Grammy Awards than any other artist.",
                 "image_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/1/17/Beyonc%C3%A9_at_The_Super_Bowl_50_Half-Time_Show.jpg/440px-Beyonc%C3%A9_at_The_Super_Bowl_50_Half-Time_Show.jpg",
                 "formed_year": 1997, "country": "USA",
                 "genres": ["Pop", "R&B", "Soul"],
@@ -747,6 +747,10 @@ def seed_extra_data():
         new_artists: dict[str, models.Artist] = {}
         for data in new_artists_seed:
             artist_genres = data.pop("genres")
+            existing = db.query(models.Artist).filter(models.Artist.name.ilike(data["name"])).first()
+            if existing:
+                new_artists[data["name"]] = existing
+                continue
             artist = models.Artist(**data)
             for gname in artist_genres:
                 if gname in genres:
@@ -758,13 +762,13 @@ def seed_extra_data():
         # â”€â”€ New albums & songs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         new_catalog = [
             {
-                "artist": "BeyoncÃ©",
+                "artist": "Beyoncé",
                 "albums": [
                     {
                         "title": "Lemonade",
                         "release_date": "2016-04-23",
                         "cover_url": "https://upload.wikimedia.org/wikipedia/en/5/53/Beyonce_Lemonade_album_cover.png",
-                        "description": "BeyoncÃ©'s sixth studio album â€” a visual and sonic odyssey through infidelity, forgiveness, and Black womanhood.",
+                        "description": "Beyoncé's sixth studio album â€” a visual and sonic odyssey through infidelity, forgiveness, and Black womanhood.",
                         "genres": ["R&B", "Soul", "Pop"],
                         "songs": [
                             {"title": "Hold Up",      "duration_seconds": 214, "track_number": 2},
@@ -973,7 +977,7 @@ def seed_extra_data():
         new_users_seed = [
             dict(username="bey_hive",        email="beyhive@tunelog.com",    pw="password123",
                  bio="Certified member of the Beyhive. Lemonade changed my life and I will die on that hill.",
-                 prefs={"genres": ["R&B", "Pop", "Soul"], "moods": ["empowering", "emotional"], "free_text": "BeyoncÃ©, SZA, Lizzo â€” power and vulnerability in music"}),
+                 prefs={"genres": ["R&B", "Pop", "Soul"], "moods": ["empowering", "emotional"], "free_text": "Beyoncé, SZA, Lizzo â€” power and vulnerability in music"}),
             dict(username="synth_wave_kid",  email="synth@tunelog.com",      pw="password123",
                  bio="Chasing 80s nostalgia through modern production. The Weeknd and Daft Punk are my north stars.",
                  prefs={"genres": ["Electronic", "R&B", "Dance"], "moods": ["chill", "energetic"], "free_text": "Synthwave, nu-disco, everything with a pulsing bassline"}),
@@ -1058,7 +1062,7 @@ def seed_extra_data():
         new_reviews = [
             # â”€â”€ Lemonade â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             rev("bey_hive",        album_title="Lemonade", rating=5.0, days_ago=6,
-                text="A visual and sonic masterpiece. BeyoncÃ© lays herself bare across every genre imaginable. Formation alone is worth a perfect score."),
+                text="A visual and sonic masterpiece. Beyoncé lays herself bare across every genre imaginable. Formation alone is worth a perfect score."),
             rev("musiclover",      album_title="Lemonade", rating=4.5, days_ago=8,
                 text="The range on this album is staggering â€” country, blues, hip-hop, R&B. Arguably her best creative statement."),
             rev("rbsoul",          album_title="Lemonade", rating=5.0, days_ago=5,
@@ -1080,7 +1084,7 @@ def seed_extra_data():
             rev("bey_hive",        song_title="Formation", rating=5.0, days_ago=6,
                 text="The most important music video of the 2010s. Musically it's a Mardi Gras parade run through a trap filter and it slaps impossibly hard."),
             rev("rbsoul",          song_title="Freedom", rating=5.0, days_ago=5,
-                text="BeyoncÃ© and Kendrick on the same track. The gospel choir outro. The urgency. An anthem that will last forever."),
+                text="Beyoncé and Kendrick on the same track. The gospel choir outro. The urgency. An anthem that will last forever."),
 
             # â”€â”€ After Hours â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             rev("synth_wave_kid",  album_title="After Hours", rating=5.0, days_ago=12,
@@ -1286,7 +1290,7 @@ def seed_extra_data():
             {
                 "user": "bey_hive",
                 "name": "The Bey Canon",
-                "description": "Every BeyoncÃ© album ranked in my heart. Non-negotiable top tier.",
+                "description": "Every Beyoncé album ranked in my heart. Non-negotiable top tier.",
                 "list_type": "custom",
                 "albums": ["Lemonade", "Renaissance"],
             },
@@ -1518,7 +1522,7 @@ def seed_activity_boost():
             ("dance_floor_dan","Folklore",         4.0, "Okay I thought this was going to be boring but august absolutely wrecked me.", 3),
             ("tyler_fan_2019", "Folklore",         4.5, "exile is a perfect song. I wasn't expecting to care this much.", 6),
             # To Pimp a Butterfly wave
-            ("bey_hive",       "To Pimp a Butterfly", 5.0, "Freedom on this album hits completely differently after hearing BeyoncÃ©'s version. Kendrick is a genius.", 7),
+            ("bey_hive",       "To Pimp a Butterfly", 5.0, "Freedom on this album hits completely differently after hearing Beyoncé's version. Kendrick is a genius.", 7),
             ("synth_wave_kid", "To Pimp a Butterfly", 4.5, "The jazz-rap fusion is unlike anything I'd heard before. Alright is an anthem for the ages.", 10),
             # Blonde wave
             ("tyler_fan_2019", "Blonde",           5.0, "This album is the reason I make music. The most emotionally sophisticated R&B record I've ever heard.", 5),
@@ -1549,7 +1553,7 @@ def seed_activity_boost():
         recent_song_reviews = [
             ("gen_z_ears",     "Here Comes the Sun",            5.0, "This song is a hug. The most comforting three minutes in all of music.", 5),
             ("bey_hive",       "Nights",                        5.0, "That beat switch. Nothing else exists like it.", 6),
-            ("dance_floor_dan","BREAK MY SOUL",                 5.0, "Every time this comes on at a party the whole room shifts. BeyoncÃ© gave us an anthem.", 7),
+            ("dance_floor_dan","BREAK MY SOUL",                 5.0, "Every time this comes on at a party the whole room shifts. Beyoncé gave us an anthem.", 7),
             ("gen_z_ears",     "BIRDS OF A FEATHER",            5.0, "I want this played at every important moment of my life from now on. Billie's best song.", 2),
             ("tyler_fan_2019", "See You Again",                 5.0, "I am not okay after this song. The kiwi verse. The chorus. All of it.", 5),
             ("synth_wave_kid", "Die for You",                   5.0, "This song makes me believe in love. The Weeknd at his most purely romantic.", 8),
@@ -1646,7 +1650,7 @@ def seed_rich_demo_data():
                 email="popprincess@tunelog.com", pw="password123",
                 bio="Unashamedly obsessed with pop perfection. A great hook is high art.",
                 prefs={"genres": ["Pop", "R&B", "Electronic"], "moods": ["happy", "energetic"],
-                       "free_text": "Bops, bangers, and certified earworms â€” from BeyoncÃ© to Billie"},
+                       "free_text": "Bops, bangers, and certified earworms â€” from Beyoncé to Billie"},
             ),
             dict(
                 username="lo_fi_lucia",
@@ -2097,7 +2101,7 @@ def seed_critical_reviews():
             ("classicrock_fan", "channel ORANGE", None, 2.0,
              "Not my genre at all and nothing here converted me. Sweet Life has a decent melody but the production sounds like a demo on most tracks.", 65),
 
-            # â”€â”€ BeyoncÃ© â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            # â”€â”€ Beyoncé â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             ("classicrock_fan", "Lemonade", None, 2.0,
              "Technically proficient and culturally significant but musically it's all over the place. Formation is great. The country-blues hybrid tracks are a mess.", 20),
             ("indie_vibes", "Renaissance", None, 2.5,
@@ -2121,7 +2125,7 @@ def seed_critical_reviews():
             ("classicrock_fan", "Flower Boy", None, 2.0,
              "Boredom is a decent song. The rest sounds like background music for a coffee shop that takes itself too seriously.", 45),
             ("dance_floor_dan", "IGOR", None, 2.0,
-             "I wanted to like this more. EARFQUAKE is genuinely fun and then it justâ€¦ meanders for 40 minutes. Confusing and slow.", 32),
+             "I wanted to like this more. EARFQUAKE is genuinely fun and then it just… meanders for 40 minutes. Confusing and slow.", 32),
 
             # â”€â”€ Billie Eilish â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             ("classicrock_fan", "When We All Fall Asleep, Where Do We Go?", None, 1.5,
@@ -2151,7 +2155,7 @@ def seed_critical_reviews():
             ("hiphop_head", None, "Blinding Lights", 2.5,
              "A well-executed 80s pastiche that sounds better than 99% of actual 80s music but has nothing to say. It's a jingle for a very expensive car.", 30),
             ("indie_vibes", None, "BREAK MY SOUL", 2.0,
-             "Dance music as corporate motivation speech. 'Release ya anger, release ya mind' over a house groove is not the transcendence BeyoncÃ© thinks it is here.", 25),
+             "Dance music as corporate motivation speech. 'Release ya anger, release ya mind' over a house groove is not the transcendence Beyoncé thinks it is here.", 25),
             ("classicrock_fan", None, "HUMBLE.", 2.5,
              "The video is more interesting than the song. Drop Kendrick into any era and he'd still be technically gifted; this beat is beneath him.", 40),
         ]
@@ -2554,25 +2558,25 @@ def seed_song_reviews():
             ("lo_fi_lucia",     "Bad Religion",        5.0,
              "The string arrangement in the final section makes me cry every single time. Hauntingly beautiful.", 95),
 
-            # â”€â”€ BeyoncÃ© â€” Lemonade â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            # â”€â”€ Beyoncé â€” Lemonade â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             ("pop_princess_p",  "Hold Up",             5.0,
              "The most fun song about infidelity ever made. The 'Becky with the good hair' era started here and I lived for every second.", 130),
             ("rbsoul",          "Hold Up",             5.0,
-             "This is BeyoncÃ© at her most joyful and most dangerous simultaneously. The production is immaculate.", 115),
+             "This is Beyoncé at her most joyful and most dangerous simultaneously. The production is immaculate.", 115),
             ("bey_hive",        "Hold Up",             5.0,
              "She is literally smashing cars with a bat while sampling 'Maps' by Yeah Yeah Yeahs and it somehow works perfectly.", 140),
             ("indie_vibes",     "Hold Up",             4.0,
-             "The Yeah Yeah Yeahs sample is inspired and BeyoncÃ©'s delivery is playful in a way she rarely allows herself.", 55),
+             "The Yeah Yeah Yeahs sample is inspired and Beyoncé's delivery is playful in a way she rarely allows herself.", 55),
 
             ("bey_hive",        "Don't Hurt Yourself",  5.0,
-             "Jack White and BeyoncÃ© is the collaboration nobody predicted and everybody needed. The rage is authentic.", 120),
+             "Jack White and Beyoncé is the collaboration nobody predicted and everybody needed. The rage is authentic.", 120),
             ("rbsoul",          "Don't Hurt Yourself",  4.5,
              "The Led Zeppelin sample choice is perfect. The blues-rock fury fits the anger better than any R&B beat would.", 80),
             ("classicrock_fan", "Don't Hurt Yourself",  4.0,
-             "The Zeppelin interpolation is good and BeyoncÃ©'s voice in this register is genuinely powerful. One of her better moments.", 35),
+             "The Zeppelin interpolation is good and Beyoncé's voice in this register is genuinely powerful. One of her better moments.", 35),
 
             ("bey_hive",        "Sorry",               5.0,
-             "The most quotable BeyoncÃ© song in decades. The 'middle fingers up' energy is earned and the production is cold perfection.", 135),
+             "The most quotable Beyoncé song in decades. The 'middle fingers up' energy is earned and the production is cold perfection.", 135),
             ("pop_princess_p",  "Sorry",               5.0,
              "This song made 'boy bye' a cultural moment and I'm grateful every day. The production switch in the second verse is inspired.", 110),
             ("hiphop_head",     "Sorry",               4.5,
@@ -2585,7 +2589,7 @@ def seed_song_reviews():
             ("bey_hive",        "Love Drought",        5.0,
              "Everything the discourse focuses on the other tracks misses how quietly devastating this one is. Perfect.", 85),
 
-            # â”€â”€ BeyoncÃ© â€” Renaissance â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            # â”€â”€ Beyoncé â€” Renaissance â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             ("dance_floor_dan", "CUFF IT",             5.0,
              "The smoothest disco revival of the decade. This song makes every room better just by existing in it.", 120),
             ("pop_princess_p",  "CUFF IT",             5.0,
@@ -2601,7 +2605,7 @@ def seed_song_reviews():
              "The mix is optimized for maximum aggression on a club system and it works in context. Exhausting on headphones.", 25),
 
             ("rbsoul",          "VIRGO'S GROOVE",      5.0,
-             "Seven minutes of immaculate groove music. The extended dance break section is everything I want from a BeyoncÃ© album.", 90),
+             "Seven minutes of immaculate groove music. The extended dance break section is everything I want from a Beyoncé album.", 90),
             ("dance_floor_dan", "VIRGO'S GROOVE",      5.0,
              "This is the center of Renaissance and it's perfect. The production is deep and patient in a way pop music rarely allows.", 85),
             ("lo_fi_lucia",     "VIRGO'S GROOVE",      4.5,

@@ -380,6 +380,7 @@ def list_artists(
 def recommended_combined(
     artist_limit: int = 6,
     song_limit: int = 6,
+    album_limit: int = 6,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
@@ -524,6 +525,71 @@ def recommended_combined(
         max_per_artist=1, max_per_genre=2,
     )
 
+    # ── Albums ────────────────────────────────────────────────────────────────
+    seen_album_rows = db.execute(_text("""
+        SELECT album_id FROM reviews
+          WHERE user_id = :uid AND album_id IS NOT NULL
+        UNION
+        SELECT album_id FROM user_album_statuses WHERE user_id = :uid
+        UNION
+        SELECT li.album_id FROM list_items li
+          JOIN lists l ON l.id = li.list_id
+         WHERE l.user_id = :uid AND li.album_id IS NOT NULL
+    """), {"uid": uid}).fetchall()
+    seen_album_ids: set[int] = {r[0] for r in seen_album_rows}
+
+    avg_album_ratings: dict[int, float] = {
+        aid: float(avg)
+        for aid, avg in db.query(models.Review.album_id, func.avg(models.Review.rating))
+        .filter(models.Review.album_id.isnot(None))
+        .group_by(models.Review.album_id)
+        .all()
+    }
+
+    if liked_genre_artist_ids:
+        aq = (
+            db.query(models.Album)
+            .options(
+                joinedload(models.Album.artist).joinedload(models.Artist.genres),
+                joinedload(models.Album.genres),
+            )
+            .filter(models.Album.artist_id.in_(liked_genre_artist_ids))
+        )
+        if seen_album_ids:
+            aq = aq.filter(~models.Album.id.in_(seen_album_ids))
+        album_candidates = aq.all()
+    else:
+        album_candidates = []
+
+    def _album_score(al: models.Album) -> float:
+        score = sum(
+            liked_genre_counts[g.id]
+            for g in (al.artist.genres if al.artist else [])
+            if g.id in liked_genre_ids
+        )
+        score += artist_scores.get(al.artist_id, 0.0) * 0.5
+        score += avg_album_ratings.get(al.id, 0.0)
+        return score
+
+    def _album_reason(al: models.Album) -> str | None:
+        if artist_scores.get(al.artist_id, 0.0) >= 1.0:
+            return f"Because you like {al.artist.name}"
+        best = max(
+            (g for g in (al.artist.genres if al.artist else []) if g.id in liked_genre_ids),
+            key=lambda g: liked_genre_counts[g.id], default=None,
+        )
+        if best and best.id in pref_only_genre_ids:
+            return f"Matches your {best.name} interest"
+        r = avg_album_ratings.get(al.id)
+        return f"Highly rated · ★ {r:.1f}" if r and r >= 4.0 else None
+
+    top_albums = _diverse_pick(
+        sorted(album_candidates, key=_album_score, reverse=True), album_limit,
+        get_artist_id=lambda al: al.artist_id,
+        get_genre_ids=lambda al: [g.id for g in (al.artist.genres if al.artist else [])],
+        max_per_artist=2, max_per_genre=3,
+    )
+
     return {
         "artists": [
             {
@@ -532,6 +598,17 @@ def recommended_combined(
                 "reason": _artist_reason(a),
             }
             for a in top_artists
+        ],
+        "albums": [
+            {
+                "id": al.id, "title": al.title,
+                "cover_url": al.cover_url,
+                "release_date": al.release_date,
+                "artist": {"id": al.artist.id, "name": al.artist.name} if al.artist else None,
+                "average_rating": round(avg_album_ratings[al.id], 2) if al.id in avg_album_ratings else None,
+                "reason": _album_reason(al),
+            }
+            for al in top_albums
         ],
         "songs": [
             {
