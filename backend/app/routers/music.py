@@ -418,12 +418,24 @@ def recommended_combined(
     artist_candidates = (
         db.query(models.Artist)
         .options(joinedload(models.Artist.genres))
-        .filter(~models.Artist.id.in_(interacted_ids))
+        .filter(~models.Artist.id.in_(interacted_ids) if interacted_ids else True)
         .all()
     )
 
+    # Pre-compute review counts for fallback ranking
+    artist_review_counts: dict[int, int] = {
+        aid: cnt for aid, cnt in
+        db.query(models.Review.album_id, func.count(models.Review.id))
+        .filter(models.Review.album_id.isnot(None))
+        .join(models.Album, models.Review.album_id == models.Album.id)
+        .group_by(models.Album.artist_id)
+        .with_entities(models.Album.artist_id, func.count(models.Review.id))
+        .all()
+    } if artist_candidates else {}
+
     def _artist_score(a: models.Artist) -> float:
-        return sum(liked_genre_counts[g.id] for g in a.genres if g.id in liked_genre_ids)
+        genre_score = sum(liked_genre_counts[g.id] for g in a.genres if g.id in liked_genre_ids)
+        return genre_score if genre_score > 0 else artist_review_counts.get(a.id, 0) * 0.01
 
     def _artist_reason(a: models.Artist) -> str | None:
         best = max((g for g in a.genres if g.id in liked_genre_ids),
@@ -432,7 +444,7 @@ def recommended_combined(
             return f"Matches your {best.name} interest"
         return None
 
-    sorted_artists = [a for a in sorted(artist_candidates, key=_artist_score, reverse=True) if _artist_score(a) > 0]
+    sorted_artists = sorted(artist_candidates, key=_artist_score, reverse=True)
     top_artists = _diverse_pick(
         sorted_artists, artist_limit,
         get_artist_id=lambda a: a.id,
@@ -481,20 +493,18 @@ def recommended_combined(
         }
     liked_genre_artist_ids |= liked_artist_ids  # also include directly-interacted artists
 
-    if liked_genre_artist_ids:
-        q = (
-            db.query(models.Song)
-            .options(
-                joinedload(models.Song.artist).joinedload(models.Artist.genres),
-                joinedload(models.Song.album),
-            )
-            .filter(models.Song.artist_id.in_(liked_genre_artist_ids))
+    q = (
+        db.query(models.Song)
+        .options(
+            joinedload(models.Song.artist).joinedload(models.Artist.genres),
+            joinedload(models.Song.album),
         )
-        if seen_song_ids:
-            q = q.filter(~models.Song.id.in_(seen_song_ids))
-        song_candidates = q.all()
-    else:
-        song_candidates = []
+    )
+    if liked_genre_artist_ids:
+        q = q.filter(models.Song.artist_id.in_(liked_genre_artist_ids))
+    if seen_song_ids:
+        q = q.filter(~models.Song.id.in_(seen_song_ids))
+    song_candidates = q.limit(200).all()
 
     def _song_score(s: models.Song) -> float:
         score = sum(
@@ -546,20 +556,18 @@ def recommended_combined(
         .all()
     }
 
-    if liked_genre_artist_ids:
-        aq = (
-            db.query(models.Album)
-            .options(
-                joinedload(models.Album.artist).joinedload(models.Artist.genres),
-                joinedload(models.Album.genres),
-            )
-            .filter(models.Album.artist_id.in_(liked_genre_artist_ids))
+    aq = (
+        db.query(models.Album)
+        .options(
+            joinedload(models.Album.artist).joinedload(models.Artist.genres),
+            joinedload(models.Album.genres),
         )
-        if seen_album_ids:
-            aq = aq.filter(~models.Album.id.in_(seen_album_ids))
-        album_candidates = aq.all()
-    else:
-        album_candidates = []
+    )
+    if liked_genre_artist_ids:
+        aq = aq.filter(models.Album.artist_id.in_(liked_genre_artist_ids))
+    if seen_album_ids:
+        aq = aq.filter(~models.Album.id.in_(seen_album_ids))
+    album_candidates = aq.limit(200).all()
 
     def _album_score(al: models.Album) -> float:
         score = sum(

@@ -14,6 +14,7 @@ export default function Home() {
   const [recommended, setRecommended]           = useState([])
   const [recommendedAlbums, setRecAlbums]       = useState([])
   const [recommendedArtists, setRecArtists]     = useState([])
+  const [recsLoading, setRecsLoading]           = useState(true)
   const [recentAlbums, setRecentAlbums]         = useState([])
   const [recentSongs, setRecentSongs]           = useState([])
   const [recentAlbumsLoading, setRecentAlbumsLoading] = useState(true)
@@ -58,12 +59,14 @@ export default function Home() {
       axios.get('/api/music/recommended?song_limit=8&album_limit=6')
         .then(r => { setRecommended(r.data.songs); setRecArtists(r.data.artists); setRecAlbums(r.data.albums || []) })
         .catch(() => {})
+        .finally(() => setRecsLoading(false))
       axios.get('/api/users/suggested?limit=5')
         .then(r => setSuggested(r.data))
         .catch(() => {})
     } else {
       setRecentAlbumsLoading(false)
       setRecentSongsLoading(false)
+      setRecsLoading(false)
     }
   }, [user])
 
@@ -148,41 +151,59 @@ export default function Home() {
       </section>
 
       {/* Recommended Artists */}
-      {user && recommendedArtists.length > 0 && (
+      {user && (recsLoading || recommendedArtists.length > 0) && (
         <section>
           <div className="mb-5">
             <h2 className="text-xl font-bold text-white">Recommended Artists</h2>
             <p className="text-gray-500 text-sm mt-0.5">Artists you might enjoy based on your taste</p>
           </div>
-          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-4">
-            {recommendedArtists.map(a => <RecommendedArtistCard key={a.id} artist={a} />)}
-          </div>
+          {recsLoading ? (
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-4">
+              {Array.from({ length: 6 }).map((_, i) => <ArtistSkeleton key={i} />)}
+            </div>
+          ) : (
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-4">
+              {recommendedArtists.map(a => <RecommendedArtistCard key={a.id} artist={a} />)}
+            </div>
+          )}
         </section>
       )}
 
       {/* Recommended Albums */}
-      {user && recommendedAlbums.length > 0 && (
+      {user && (recsLoading || recommendedAlbums.length > 0) && (
         <section>
           <div className="mb-5">
             <h2 className="text-xl font-bold text-white">Recommended Albums</h2>
             <p className="text-gray-500 text-sm mt-0.5">Albums you might enjoy based on your taste and interests</p>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
-            {recommendedAlbums.map(a => <ForYouAlbumCard key={a.id} album={a} />)}
-          </div>
+          {recsLoading ? (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
+              {Array.from({ length: 6 }).map((_, i) => <AlbumSkeleton key={i} />)}
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
+              {recommendedAlbums.map(a => <ForYouAlbumCard key={a.id} album={a} />)}
+            </div>
+          )}
         </section>
       )}
 
       {/* Recommended Songs */}
-      {user && recommended.length > 0 && (
+      {user && (recsLoading || recommended.length > 0) && (
         <section>
           <div className="mb-5">
             <h2 className="text-xl font-bold text-white">Recommended Songs</h2>
             <p className="text-gray-500 text-sm mt-0.5">Picked for you based on your taste</p>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {recommended.map(s => <RecommendedSongRow key={s.id} song={s} />)}
-          </div>
+          {recsLoading ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {Array.from({ length: 4 }).map((_, i) => <SongSkeleton key={i} />)}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {recommended.map(s => <RecommendedSongRow key={s.id} song={s} />)}
+            </div>
+          )}
         </section>
       )}
 
