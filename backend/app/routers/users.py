@@ -533,6 +533,7 @@ def get_user_reviews(
         elif r.song:
             row["target_title"] = r.song.title
             row["target_cover"] = r.song.album.cover_url if r.song.album else None
+            row["target_album_title"] = r.song.album.title if r.song.album else None
             row["target_type"] = "song"
             row["target_artist"] = r.song.artist.name if r.song.artist else None
         result.append(row)

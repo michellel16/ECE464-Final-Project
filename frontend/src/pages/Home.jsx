@@ -42,7 +42,7 @@ export default function Home() {
             }
             if (rev.target_type === 'song' && rev.song_id && !seenSongs.has(rev.song_id) && songs.length < 6) {
               seenSongs.add(rev.song_id)
-              songs.push({ id: rev.song_id, title: rev.target_title, album: { cover_url: rev.target_cover }, artist: { name: rev.target_artist } })
+              songs.push({ id: rev.song_id, title: rev.target_title, album: rev.target_cover || rev.target_album_title ? { cover_url: rev.target_cover, title: rev.target_album_title } : null, artist: { name: rev.target_artist } })
             }
           }
           setRecentAlbums(albums)
