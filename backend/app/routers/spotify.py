@@ -140,6 +140,89 @@ def _sync_artist_genres(artist, spotify_genres: list[str], db) -> None:
             existing_ids.add(genre.id)
 
 
+def _get_or_create_artist(db, spotify_id: str | None, name: str, image_url: str | None) -> models.Artist:
+    """
+    Find an existing artist by spotify_id (preferred) or name, creating one if absent.
+    Safe against concurrent requests: on IntegrityError re-fetches the row that won.
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    # 1. Lookup by spotify_id
+    if spotify_id:
+        artist = db.query(models.Artist).filter(models.Artist.spotify_id == spotify_id).first()
+        if artist:
+            return artist
+
+    # 2. Fallback: name match (handles seed data with no spotify_id)
+    if name:
+        artist = db.query(models.Artist).filter(models.Artist.name.ilike(name)).first()
+        if artist:
+            if spotify_id and not artist.spotify_id:
+                artist.spotify_id = spotify_id
+            if image_url and not artist.image_url:
+                artist.image_url = image_url
+            return artist
+
+    # 3. Create — catch race-condition duplicate on unique spotify_id index
+    artist = models.Artist(name=name or "Unknown Artist", spotify_id=spotify_id, image_url=image_url)
+    db.add(artist)
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        artist = db.query(models.Artist).filter(models.Artist.spotify_id == spotify_id).first()
+        if not artist:
+            raise
+    return artist
+
+
+def _get_or_create_album(db, spotify_id: str | None, title: str, artist_id: int,
+                          cover_url: str | None, release_date: str | None,
+                          description: str | None = None) -> models.Album:
+    """
+    Find an existing album by spotify_id (preferred) or title+artist, creating one if absent.
+    Safe against concurrent requests.
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    if spotify_id:
+        album = db.query(models.Album).filter(models.Album.spotify_id == spotify_id).first()
+        if album:
+            if cover_url and not album.cover_url:
+                album.cover_url = cover_url
+            if release_date and not album.release_date:
+                album.release_date = release_date
+            return album
+
+    if title:
+        album = db.query(models.Album).filter(
+            models.Album.title.ilike(title),
+            models.Album.artist_id == artist_id,
+        ).first()
+        if album:
+            if spotify_id and not album.spotify_id:
+                album.spotify_id = spotify_id
+            if cover_url and not album.cover_url:
+                album.cover_url = cover_url
+            if release_date and not album.release_date:
+                album.release_date = release_date
+            return album
+
+    album = models.Album(
+        title=title, artist_id=artist_id, spotify_id=spotify_id,
+        cover_url=cover_url, release_date=release_date, description=description,
+    )
+    db.add(album)
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        album = db.query(models.Album).filter(models.Album.spotify_id == spotify_id).first()
+        if not album:
+            raise
+    return album
+
+
 def _sync_album_genres(album, artist, db) -> None:
     """Propagate the artist's genres onto the album when the album has none."""
     if album.genres or not artist.genres:
@@ -521,41 +604,24 @@ async def import_track(
         )
         features = features_resp.json() if features_resp.status_code == 200 else {}
 
-        # Resolve artist — update existing artists' missing fields
+        # Resolve artist
         sp_artists = track.get("artists", [])
         sp_artist  = sp_artists[0] if sp_artists else {}
-        artist = db.query(models.Artist).filter(models.Artist.spotify_id == sp_artist.get("id")).first()
-        if not artist and sp_artist.get("name"):
-            artist = db.query(models.Artist).filter(
-                models.Artist.name.ilike(sp_artist["name"])
-            ).first()
 
-        # Fetch full artist from Spotify if we need image or genres
+        # Fetch full artist from Spotify for image + genres if needed
         sp_artist_full = None
-        if sp_artist.get("id") and (not artist or not artist.image_url or not artist.genres):
-            art_resp = await client.get(
-                f"https://api.spotify.com/v1/artists/{sp_artist['id']}",
-                headers=_spotify_headers(token),
-            )
-            if art_resp.status_code == 200:
-                sp_artist_full = art_resp.json()
+        if sp_artist.get("id"):
+            existing_check = db.query(models.Artist).filter(models.Artist.spotify_id == sp_artist["id"]).first()
+            if not existing_check or not existing_check.image_url or not existing_check.genres:
+                art_resp = await client.get(
+                    f"https://api.spotify.com/v1/artists/{sp_artist['id']}",
+                    headers=_spotify_headers(token),
+                )
+                if art_resp.status_code == 200:
+                    sp_artist_full = art_resp.json()
 
-        if artist:
-            # Fill in any missing fields on the existing artist
-            if not artist.spotify_id and sp_artist.get("id"):
-                artist.spotify_id = sp_artist["id"]
-            if not artist.image_url and sp_artist_full:
-                images = sp_artist_full.get("images") or []
-                if images:
-                    artist.image_url = images[0]["url"]
-        else:
-            artist = models.Artist(
-                name=sp_artist.get("name", "Unknown Artist"),
-                spotify_id=sp_artist.get("id"),
-                image_url=(sp_artist_full.get("images") or [{}])[0].get("url") if sp_artist_full else None,
-            )
-            db.add(artist)
-            db.flush()
+        art_image = (sp_artist_full.get("images") or [{}])[0].get("url") if sp_artist_full else None
+        artist = _get_or_create_artist(db, sp_artist.get("id"), sp_artist.get("name", "Unknown Artist"), art_image)
 
     if sp_artist_full:
         _sync_artist_genres(artist, sp_artist_full.get("genres", []), db)
@@ -565,34 +631,18 @@ async def import_track(
 
     # Resolve album
     sp_album = track.get("album", {})
-    album = db.query(models.Album).filter(models.Album.spotify_id == sp_album.get("id")).first()
-    if not album and sp_album.get("name"):
-        album = db.query(models.Album).filter(
-            models.Album.title.ilike(sp_album["name"]),
-            models.Album.artist_id == artist.id,
-        ).first()
-    sp_images = sp_album.get("images") or []
-    if album:
-        # Fill in any missing fields on the existing album
-        if not album.spotify_id and sp_album.get("id"):
-            album.spotify_id = sp_album["id"]
-        if not album.cover_url and sp_images:
-            album.cover_url = sp_images[0]["url"]
-        if not album.release_date and sp_album.get("release_date"):
-            album.release_date = sp_album["release_date"][:4]
-    elif sp_album.get("name"):
-        release_date = sp_album.get("release_date")
-        album = models.Album(
+    album = None
+    if sp_album.get("name"):
+        sp_images    = sp_album.get("images") or []
+        release_date = sp_album.get("release_date", "")
+        album = _get_or_create_album(
+            db,
+            spotify_id=sp_album.get("id"),
             title=sp_album["name"],
             artist_id=artist.id,
-            spotify_id=sp_album.get("id"),
             cover_url=sp_images[0]["url"] if sp_images else None,
             release_date=release_date[:4] if release_date else None,
         )
-        db.add(album)
-        db.flush()
-
-    if album:
         _sync_album_genres(album, artist, db)
 
     # Create song
@@ -1189,40 +1239,27 @@ async def import_album(
     # ── Resolve / create artist ──
     sp_artists = sp_album.get("artists") or []
     sp_artist  = sp_artists[0] if sp_artists else {}
-    artist = None
-    if sp_artist.get("id"):
-        artist = db.query(models.Artist).filter(models.Artist.spotify_id == sp_artist["id"]).first()
-    if not artist and sp_artist.get("name"):
-        artist = db.query(models.Artist).filter(models.Artist.name.ilike(sp_artist["name"])).first()
 
-    # Fetch full artist for image + genres (new artist, or existing one missing either)
+    # Fetch full artist for image + genres if needed
     sp_art_full = None
-    if sp_artist.get("id") and (not artist or not artist.image_url or not artist.genres):
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            art_resp = await client.get(
-                f"https://api.spotify.com/v1/artists/{sp_artist['id']}",
-                headers=_spotify_headers(token),
-            )
-        if art_resp.status_code == 200:
-            sp_art_full = art_resp.json()
+    if sp_artist.get("id"):
+        existing_check = db.query(models.Artist).filter(models.Artist.spotify_id == sp_artist["id"]).first()
+        if not existing_check or not existing_check.image_url or not existing_check.genres:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                art_resp = await client.get(
+                    f"https://api.spotify.com/v1/artists/{sp_artist['id']}",
+                    headers=_spotify_headers(token),
+                )
+            if art_resp.status_code == 200:
+                sp_art_full = art_resp.json()
 
-    if not artist:
-        art_images = (sp_art_full.get("images") or []) if sp_art_full else []
-        artist = models.Artist(
-            name=(sp_art_full or sp_artist).get("name", "Unknown Artist"),
-            spotify_id=sp_artist.get("id"),
-            image_url=art_images[0]["url"] if art_images else None,
-        )
-        db.add(artist)
-        db.flush()
-    else:
-        if not artist.spotify_id and sp_artist.get("id"):
-            artist.spotify_id = sp_artist["id"]
-        if not artist.image_url and sp_art_full:
-            imgs = sp_art_full.get("images") or []
-            if imgs:
-                artist.image_url = imgs[0]["url"]
-        db.flush()
+    art_images = (sp_art_full.get("images") or []) if sp_art_full else []
+    artist = _get_or_create_artist(
+        db,
+        spotify_id=sp_artist.get("id"),
+        name=(sp_art_full or sp_artist).get("name", "Unknown Artist"),
+        image_url=art_images[0]["url"] if art_images else None,
+    )
 
     if sp_art_full:
         _sync_artist_genres(artist, sp_art_full.get("genres", []), db)
@@ -1232,16 +1269,15 @@ async def import_album(
     # ── Create album ──
     images       = sp_album.get("images") or []
     release_date = sp_album.get("release_date", "")
-    album = models.Album(
+    album = _get_or_create_album(
+        db,
+        spotify_id=spotify_album_id,
         title=sp_album["name"],
         artist_id=artist.id,
-        spotify_id=spotify_album_id,
         cover_url=images[0]["url"] if images else None,
         release_date=release_date[:4] if release_date else None,
         description=sp_album.get("label"),
     )
-    db.add(album)
-    db.flush()
     _sync_album_genres(album, artist, db)
 
     # ── Fetch audio features in one batch (best-effort) ──
@@ -1356,26 +1392,13 @@ async def import_artist(
         sp_albums = alb_resp.json().get("items", []) if alb_resp.status_code == 200 else []
 
     # ── Resolve / create artist ──
-    artist = db.query(models.Artist).filter(models.Artist.spotify_id == spotify_artist_id).first()
-    if not artist:
-        artist = db.query(models.Artist).filter(models.Artist.name.ilike(sp_artist["name"])).first()
-
     images = sp_artist.get("images") or []
-    if artist:
-        # Update image/spotify_id if missing
-        if not artist.spotify_id:
-            artist.spotify_id = spotify_artist_id
-        if not artist.image_url and images:
-            artist.image_url = images[0]["url"]
-        db.flush()
-    else:
-        artist = models.Artist(
-            name=sp_artist["name"],
-            spotify_id=spotify_artist_id,
-            image_url=images[0]["url"] if images else None,
-        )
-        db.add(artist)
-        db.flush()
+    artist = _get_or_create_artist(
+        db,
+        spotify_id=spotify_artist_id,
+        name=sp_artist["name"],
+        image_url=images[0]["url"] if images else None,
+    )
 
     # ── Save genres from Spotify ──
     _sync_artist_genres(artist, sp_artist.get("genres", []), db)
