@@ -21,30 +21,41 @@ export default function AlbumPage() {
   const [myStatus, setMyStatus] = useState(null)
   const [reviewDraft, setDraft] = useState({ rating: 0, text: '' })
   const [showForm, setShowForm] = useState(false)
-  const [loading, setLoading]   = useState(true)
+  const [loading, setLoading]         = useState(true)
+  const [reviewsLoading, setRevsLoad] = useState(true)
   const [saving, setSaving]     = useState(false)
   const [playingId, setPlayingId] = useState(null)
   const [showRecommend, setShowRecommend] = useState(false)
   const audioRef = useRef(null)
 
   useEffect(() => {
-    const fetches = [
-      axios.get(`/api/music/albums/${id}`),
-      axios.get(`/api/music/albums/${id}/reviews`),
-    ]
-    if (user) {
-      fetches.push(axios.get(`/api/music/albums/${id}/my-review`))
-      fetches.push(axios.get(`/api/music/albums/${id}/status`))
-    }
-    Promise.all(fetches).then(([albumRes, reviewsRes, myRevRes, statusRes]) => {
+    setLoading(true)
+    setRevsLoad(true)
+    setAlbum(null)
+    setReviews([])
+    setMyReview(null)
+    setMyStatus(null)
+
+    const albumP = axios.get(`/api/music/albums/${id}`)
+    const userP = user ? Promise.all([
+      axios.get(`/api/music/albums/${id}/my-review`),
+      axios.get(`/api/music/albums/${id}/status`),
+    ]) : Promise.resolve(null)
+
+    Promise.all([albumP, userP]).then(([albumRes, userRes]) => {
       setAlbum(albumRes.data)
-      setReviews(reviewsRes.data)
-      if (myRevRes) {
+      if (userRes) {
+        const [myRevRes, statusRes] = userRes
         setMyReview(myRevRes.data.review)
         if (myRevRes.data.review) setDraft({ rating: myRevRes.data.review.rating, text: myRevRes.data.review.text ?? '' })
+        setMyStatus(statusRes.data.status)
       }
-      if (statusRes) setMyStatus(statusRes.data.status)
-    }).finally(() => setLoading(false))
+    }).catch(() => {}).finally(() => setLoading(false))
+
+    axios.get(`/api/music/albums/${id}/reviews`)
+      .then(r => setReviews(r.data))
+      .catch(() => {})
+      .finally(() => setRevsLoad(false))
   }, [id, user])
 
   async function submitReview(e) {
@@ -243,7 +254,24 @@ export default function AlbumPage() {
         {/* Reviews */}
         <div className="lg:col-span-2">
           <h2 className="text-lg font-bold text-white mb-3">Reviews</h2>
-          <ReviewList reviews={reviews} />
+          {reviewsLoading ? (
+            <div className="space-y-3">
+              {[1, 2, 3].map(i => (
+                <div key={i} className="card p-4 animate-pulse">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="w-8 h-8 rounded-full bg-gray-800" />
+                    <div className="h-3 bg-gray-800 rounded w-24" />
+                  </div>
+                  <div className="space-y-2">
+                    <div className="h-3 bg-gray-800 rounded w-full" />
+                    <div className="h-3 bg-gray-800 rounded w-3/4" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <ReviewList reviews={reviews} />
+          )}
         </div>
       </div>
     </div>

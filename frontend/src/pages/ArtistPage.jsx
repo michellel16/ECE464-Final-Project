@@ -7,15 +7,21 @@ export default function ArtistPage() {
   const { id } = useParams()
   const [artist, setArtist] = useState(null)
   const [albums, setAlbums] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading]       = useState(true)
+  const [albumsLoading, setAlbLoad] = useState(true)
   useEffect(() => {
-    Promise.all([
-      axios.get(`/api/music/artists/${id}`),
-      axios.get(`/api/music/artists/${id}/albums`),
-    ]).then(([aRes, albRes]) => {
-      setArtist(aRes.data)
-      setAlbums(albRes.data)
-    }).finally(() => setLoading(false))
+    setLoading(true)
+    setAlbLoad(true)
+    setArtist(null)
+    setAlbums([])
+    axios.get(`/api/music/artists/${id}`)
+      .then(r => setArtist(r.data))
+      .catch(() => {})
+      .finally(() => setLoading(false))
+    axios.get(`/api/music/artists/${id}/albums`)
+      .then(r => setAlbums(r.data))
+      .catch(() => {})
+      .finally(() => setAlbLoad(false))
   }, [id])
 
   if (loading) return <Loader />
@@ -56,11 +62,23 @@ export default function ArtistPage() {
       )}
 
       <h2 className="text-xl font-bold text-white mb-4">Discography</h2>
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-5">
-        {albums.map(a => (
-          <AlbumCard key={a.id} album={{ ...a, artist: { name: artist.name } }} />
-        ))}
-      </div>
+      {albumsLoading ? (
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-5">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="animate-pulse">
+              <div className="aspect-square bg-gray-800 rounded-lg mb-2" />
+              <div className="h-3 bg-gray-800 rounded w-3/4 mb-1" />
+              <div className="h-3 bg-gray-800 rounded w-1/2" />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-5">
+          {albums.map(a => (
+            <AlbumCard key={a.id} album={{ ...a, artist: { name: artist.name } }} />
+          ))}
+        </div>
+      )}
     </div>
   )
 }

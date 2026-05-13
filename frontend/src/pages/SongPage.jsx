@@ -16,28 +16,43 @@ export default function SongPage() {
   const [draft, setDraft]       = useState({ rating: 0, text: '' })
   const [showForm, setShowForm] = useState(false)
   const [saving, setSaving]     = useState(false)
-  const [loading, setLoading]   = useState(true)
+  const [loading, setLoading]         = useState(true)
+  const [reviewsLoading, setRevsLoad] = useState(true)
   const [showListModal, setShowListModal] = useState(false)
   const [showRecommend, setShowRecommend] = useState(false)
 
   useEffect(() => {
-    const fetches = [
-      axios.get(`/api/music/songs/${id}`),
-      axios.get(`/api/music/songs/${id}/reviews`),
-    ]
-    if (user) {
-      fetches.push(axios.get(`/api/music/songs/${id}/my-review`))
-      fetches.push(axios.get(`/api/music/songs/${id}/status`))
-    }
-    Promise.all(fetches).then(([sRes, rRes, myRevRes, statusRes]) => {
+    setLoading(true)
+    setRevsLoad(true)
+    setSong(null)
+    setReviews([])
+    setMyReview(null)
+    setMyStatus(null)
+
+    // Load song details first so the page renders immediately
+    const songP = axios.get(`/api/music/songs/${id}`)
+    const userP = user ? Promise.all([
+      axios.get(`/api/music/songs/${id}/my-review`),
+      axios.get(`/api/music/songs/${id}/status`),
+    ]) : Promise.resolve(null)
+
+    Promise.all([songP, userP]).then(([sRes, userRes]) => {
       setSong(sRes.data)
-      setReviews(rRes.data)
-      if (myRevRes?.data.review) {
-        setMyReview(myRevRes.data.review)
-        setDraft({ rating: myRevRes.data.review.rating, text: myRevRes.data.review.text ?? '' })
+      if (userRes) {
+        const [myRevRes, statusRes] = userRes
+        if (myRevRes?.data.review) {
+          setMyReview(myRevRes.data.review)
+          setDraft({ rating: myRevRes.data.review.rating, text: myRevRes.data.review.text ?? '' })
+        }
+        setMyStatus(statusRes.data.status)
       }
-      if (statusRes) setMyStatus(statusRes.data.status)
-    }).finally(() => setLoading(false))
+    }).catch(() => {}).finally(() => setLoading(false))
+
+    // Load reviews separately so they don't block the song from rendering
+    axios.get(`/api/music/songs/${id}/reviews`)
+      .then(r => setReviews(r.data))
+      .catch(() => {})
+      .finally(() => setRevsLoad(false))
   }, [id, user])
 
   async function submitReview(e) {
@@ -123,7 +138,7 @@ export default function SongPage() {
       </div>
 
       {/* Spotify Embed Player */}
-      {song.spotify_id && (
+      {song.spotify_id ? (
         <div className="mb-6">
           <iframe
             src={`https://open.spotify.com/embed/track/${song.spotify_id}?utm_source=generator&theme=0`}
@@ -131,9 +146,20 @@ export default function SongPage() {
             height="152"
             frameBorder="0"
             allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-            loading="lazy"
+            allowFullScreen
             className="rounded-xl"
           />
+        </div>
+      ) : (
+        <div className="mb-6">
+          <a
+            href={`https://open.spotify.com/search/${encodeURIComponent(`${song.title} ${song.artist?.name}`)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2 text-sm text-green-500 hover:text-green-400 transition-colors"
+          >
+            <SpotifyIcon /> Search on Spotify
+          </a>
         </div>
       )}
 
@@ -233,7 +259,24 @@ export default function SongPage() {
 
       {/* Reviews */}
       <h2 className="text-lg font-bold text-white mb-3">Reviews</h2>
-      <ReviewList reviews={reviews} />
+      {reviewsLoading ? (
+        <div className="space-y-3">
+          {[1, 2, 3].map(i => (
+            <div key={i} className="card p-4 animate-pulse">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-8 h-8 rounded-full bg-gray-800" />
+                <div className="h-3 bg-gray-800 rounded w-24" />
+              </div>
+              <div className="space-y-2">
+                <div className="h-3 bg-gray-800 rounded w-full" />
+                <div className="h-3 bg-gray-800 rounded w-3/4" />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <ReviewList reviews={reviews} />
+      )}
 
       {showListModal && (
         <AddToListModal songId={Number(id)} onClose={() => setShowListModal(false)} />

@@ -645,27 +645,55 @@ async def import_track(
         )
         _sync_album_genres(album, artist, db)
 
-    # Create song
+    # Check if a seed song with same title+artist already exists (no spotify_id yet)
     duration_ms = track.get("duration_ms")
-    song = models.Song(
-        title=track["name"],
-        artist_id=artist.id,
-        album_id=album.id if album else None,
-        duration_seconds=int(duration_ms / 1000) if duration_ms else None,
-        track_number=track.get("track_number"),
-        spotify_id=spotify_track_id,
-        spotify_preview_url=track.get("preview_url"),
-        danceability=features.get("danceability"),
-        energy=features.get("energy"),
-        valence=features.get("valence"),
-        loudness=features.get("loudness"),
-        tempo=features.get("tempo"),
-        acousticness=features.get("acousticness"),
-        instrumentalness=features.get("instrumentalness"),
+    existing_seed = (
+        db.query(models.Song)
+        .filter(
+            models.Song.artist_id == artist.id,
+            models.Song.title.ilike(track["name"]),
+            models.Song.spotify_id.is_(None),
+        )
+        .first()
     )
-    db.add(song)
-    db.commit()
-    db.refresh(song)
+    if existing_seed:
+        existing_seed.spotify_id = spotify_track_id
+        existing_seed.spotify_preview_url = track.get("preview_url")
+        if album and not existing_seed.album_id:
+            existing_seed.album_id = album.id
+        if not existing_seed.duration_seconds and duration_ms:
+            existing_seed.duration_seconds = int(duration_ms / 1000)
+        if features:
+            existing_seed.danceability    = features.get("danceability")
+            existing_seed.energy          = features.get("energy")
+            existing_seed.valence         = features.get("valence")
+            existing_seed.loudness        = features.get("loudness")
+            existing_seed.tempo           = features.get("tempo")
+            existing_seed.acousticness    = features.get("acousticness")
+            existing_seed.instrumentalness = features.get("instrumentalness")
+        db.commit()
+        db.refresh(existing_seed)
+        song = existing_seed
+    else:
+        song = models.Song(
+            title=track["name"],
+            artist_id=artist.id,
+            album_id=album.id if album else None,
+            duration_seconds=int(duration_ms / 1000) if duration_ms else None,
+            track_number=track.get("track_number"),
+            spotify_id=spotify_track_id,
+            spotify_preview_url=track.get("preview_url"),
+            danceability=features.get("danceability"),
+            energy=features.get("energy"),
+            valence=features.get("valence"),
+            loudness=features.get("loudness"),
+            tempo=features.get("tempo"),
+            acousticness=features.get("acousticness"),
+            instrumentalness=features.get("instrumentalness"),
+        )
+        db.add(song)
+        db.commit()
+        db.refresh(song)
 
     # Fire-and-forget: embed the new song (and its artist/album) in the background
     from ..embeddings import reembed_song_bg, reembed_artist_bg, reembed_album_bg
