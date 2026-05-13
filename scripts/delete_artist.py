@@ -40,6 +40,8 @@ def delete_artist(conn, artist_id, name):
     conn.execute(text("DELETE FROM user_album_statuses WHERE album_id IN (SELECT id FROM albums WHERE artist_id=:id)"), {"id": artist_id})
     conn.execute(text("DELETE FROM list_items WHERE song_id IN (SELECT id FROM songs WHERE artist_id=:id OR album_id IN (SELECT id FROM albums WHERE artist_id=:id))"), {"id": artist_id})
     conn.execute(text("DELETE FROM list_items WHERE album_id IN (SELECT id FROM albums WHERE artist_id=:id)"), {"id": artist_id})
+    conn.execute(text("DELETE FROM activities WHERE target_type='song' AND target_id IN (SELECT id FROM songs WHERE artist_id=:id OR album_id IN (SELECT id FROM albums WHERE artist_id=:id))"), {"id": artist_id})
+    conn.execute(text("DELETE FROM activities WHERE target_type='album' AND target_id IN (SELECT id FROM albums WHERE artist_id=:id)"), {"id": artist_id})
     conn.execute(text("DELETE FROM songs WHERE artist_id=:id OR album_id IN (SELECT id FROM albums WHERE artist_id=:id)"), {"id": artist_id})
     conn.execute(text("DELETE FROM albums WHERE artist_id=:id"), {"id": artist_id})
     conn.execute(text("DELETE FROM artist_genre WHERE artist_id=:id"), {"id": artist_id})

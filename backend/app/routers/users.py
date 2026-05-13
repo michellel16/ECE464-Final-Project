@@ -575,6 +575,12 @@ def _enrich_activities(activities, db) -> list:
 
     result = []
     for a in activities:
+        # Skip activities whose target has since been deleted
+        if a.target_type == "album" and a.target_id and a.target_id not in albums:
+            continue
+        if a.target_type == "song" and a.target_id and a.target_id not in songs:
+            continue
+
         d = {
             "id": a.id, "user_id": a.user_id,
             "username": a.user.username, "avatar_url": a.user.avatar_url,
