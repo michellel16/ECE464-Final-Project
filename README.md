@@ -32,9 +32,8 @@ Tunelog is a music cataloging and sharing platform with Spotify integration. Use
 
 ### Prerequisites
 
-- Python 3.11+
+- Python 3.11+ w/ UV
 - Node.js 18+
-- [UV](https://docs.astral.sh/uv/getting-started/installation/)
 - PostgreSQL database (local or Supabase)
 
 ### 1. Clone the repo
@@ -77,8 +76,6 @@ uv run uvicorn backend.app.main:app --reload --port 8000
 
 The backend will be hosted on `http://localhost:8000`. The seed data (artists, albums, songs, demo user) loads automatically on the first startup.
 
-Demo account: **musiclover / password123**
-
 ### 6. Set up the frontend
 
 ```bash
@@ -103,6 +100,10 @@ curl -X POST http://localhost:8000/api/search/backfill
 Add `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, and `SPOTIFY_REDIRECT_URI=http://127.0.0.1:8000/api/spotify/callback` to `.env`.
 
 See [WRITEUP.md](./WRITEUP.md#architecture) for the architecture setup.
+
+### 9. Login with sample account
+Demo account: **musiclover / password123**
+
 
 ---
 ## Database Migrations
