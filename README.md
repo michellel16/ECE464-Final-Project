@@ -1,31 +1,30 @@
 # Tunelog
 
-A music cataloging and sharing platform with Spotify integration. Users can review albums and songs, build curated lists, follow friends, and discover new music.
+Tunelog is a music cataloging and sharing platform with Spotify integration. Users can review albums and songs, build curated lists, follow friends, and discover new music.
 
 ---
 
 ## Links
 
-| | |
-|---|---|
-| **Live App** | *https://ece-464-tunelog.vercel.app/* |
-| **Demo Video** | *(add link here)* |
+|                    | |
+|--------------------|---|
+| **Live Web App**   | *https://ece-464-tunelog.vercel.app/* |
+| **Demo Video**     | *https://drive.google.com/file/d/1w9E6hySElTZh-P_e7pXgrmQBR8VdJFby/view?usp=sharing* |
 | **Final Write-up** | [WRITEUP.md](./WRITEUP.md) |
-| **Final Presentation** | *(add link here)* |
 
 ---
 
 ## Tech Stack
 
-| Layer | Technology |
-|---|---|
-| Frontend | React 18 + Vite + Tailwind CSS |
-| Backend | FastAPI + SQLAlchemy + Alembic |
-| Database | PostgreSQL (Supabase) + pgvector |
-| Auth | Supabase Auth (JWT) |
-| Backend Hosting | Railway |
-| Frontend Hosting | Vercel |
-| External APIs | Spotify Web API, OpenAI Embeddings |
+| Layer                     | Technology                            |
+|---------------------------|---------------------------------------|
+| Frontend                  | React 18, Vite, Tailwind CSS          |
+| Backend                   | FastAP, SQLAlchemy, Alembic           |
+| Database                  | PostgreSQL w/ Supabase, pgvector      |
+| Auth                      | Supabase                              |
+| Server Hosting            | Railway                               |
+| Frontend / Client Hosting | Vercel                                |
+| Third-Party App           | Spotify Web API, OpenAI Embeddings API |
 
 ---
 
@@ -35,7 +34,7 @@ A music cataloging and sharing platform with Spotify integration. Users can revi
 
 - Python 3.11+
 - Node.js 18+
-- [UV](https://docs.astral.sh/uv/getting-started/installation/) (Python package manager)
+- [UV](https://docs.astral.sh/uv/getting-started/installation/)
 - PostgreSQL database (local or Supabase)
 
 ### 1. Clone the repo
@@ -47,17 +46,16 @@ cd ECE464-Final-Project
 
 ### 2. Set up environment variables
 
-Copy the example and fill in your values:
+Copy the example and fill in the environment variables:
 
 ```bash
 cp .env.example .env
 ```
-
-- `DATABASE_URL` — a PostgreSQL connection string
-- `SUPABASE_URL` — your Supabase project URL
-- `SECRET_KEY` — any random string for development
-
-See `.env.example` for all variables and where to find them.
+- `DATABASE_URL` (PostgreSQL connection string)
+- `SUPABASE_URL` (Supabase project URL)
+- `SECRET_KEY`
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_ANON_KEY`
 
 ### 3. Install backend dependencies
 
@@ -77,7 +75,7 @@ uv run alembic upgrade head
 uv run uvicorn backend.app.main:app --reload --port 8000
 ```
 
-The API will be `http://localhost:8000`. The seed data (artists, albums, songs, demo user) loads automatically on first startup.
+The backend will be hosted on `http://localhost:8000`. The seed data (artists, albums, songs, demo user) loads automatically on the first startup.
 
 Demo account: **musiclover / password123**
 
@@ -85,16 +83,16 @@ Demo account: **musiclover / password123**
 
 ```bash
 cd frontend
-cp .env.example .env   # fill in VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY
+cp .env.example .env
 npm install
 npm run dev
 ```
 
-The app will be at `http://localhost:5173`. The Vite dev server proxies `/api` and `/static` to `localhost:8000` — no CORS configuration needed locally.
+The app will be hosted on `http://localhost:5173`. Vite dev server proxies `/api` and `/static` to `localhost:8000` so no CORS configuration is needed for local development.
 
 ### 7. Enable semantic search
 
-Add your `OPENAI_API_KEY` to `.env`, then after the backend starts, seed the vector index:
+Add the `OPENAI_API_KEY` to `.env`. After the backend starts, backfill the vector indexes with the API:
 
 ```bash
 curl -X POST http://localhost:8000/api/search/backfill
@@ -104,28 +102,23 @@ curl -X POST http://localhost:8000/api/search/backfill
 
 Add `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, and `SPOTIFY_REDIRECT_URI=http://127.0.0.1:8000/api/spotify/callback` to `.env`.
 
----
+See [WRITEUP.md](./WRITEUP.md#architecture) for the architecture setup.
 
+---
 ## Database Migrations
 
-This project uses [Alembic](https://alembic.sqlalchemy.org/) for all schema changes.
+The project uses [Alembic](https://alembic.sqlalchemy.org/) for all schema changes.
 
 ```bash
 # Apply all migrations
 uv run alembic upgrade head
 
-# Roll back everything
+# Roll back migration
 uv run alembic downgrade base
 
 # Check current revision
 uv run alembic current
 
-# Generate a new migration after model changes
+# Generate new migration after model changes
 uv run alembic revision --autogenerate -m "description"
 ```
-
----
-
-## Deployment
-
-See the deployment guide in [WRITEUP.md & Architecture](./WRITEUP.md#architecture) for the full cloud setup (Supabase + Railway + Vercel).

@@ -16,24 +16,24 @@ The database has 18 tables that are managed through Alembic. The table definitio
 
 ### Music Catalog
 
-| Table | Purpose/Attributes                                                                                  |
-|---|---------------------------------------------------------------------------------------|
-| `artists` | Name, bio, Spotify ID, 1536-dim embedding                                             |
-| `albums` | Title, release date, cover, Spotify ID, 1536-dim embedding                            |
+| Table | Purpose/Attributes                                                               |
+|---|----------------------------------------------------------------------------------|
+| `artists` | Name, bio, Spotify ID, 1536-dim embedding                                        |
+| `albums` | Title, release date, cover, Spotify ID, 1536-dim embedding                       |
 | `songs` | Duration, track number, Spotify preview URL, audio feature floats, 1536-dim embedding |
-| `genres` | Genre tags                                                                            |
-| `artist_genre` | Many-to-many linking artists to genres                                                |
-| `album_genre` | Many-to-many linking albums to genres                                                 |
+| `genres` | Genre tags                                                                       |
+| `artist_genre` | Many-to-many relation for artists to genres                                      |
+| `album_genre` | Many-to-many relation for albums to genres                                       |
 
 ### Users and Social Activity
 
-| Table | Purpose/Attributes                                                                                               |
+| Table | Purpose/Attributes                                                                                  |
 |---|-----------------------------------------------------------------------------------------------------|
 | `users` | Supabase ID, username, email, avatar, Spotify OAuth tokens, taste embedding, music preferences JSON |
 | `user_follows` | Follows (follower_id → followed_id)                                                                 |
 | `follow_requests` | Pending follow requests for private accounts                                                        |
 | `activities` | Activity feed (review created, list created, user followed etc.)                                    |
-| `notifications` | In-app notifications (new follower, list collaboration invite, etc.)                                |
+| `notifications` | Notifications (new follower, list collaboration invite, etc.)                                       |
 
 ### Reviews and Album/Song Status Tracking
 
@@ -55,18 +55,19 @@ The database has 18 tables that are managed through Alembic. The table definitio
 | `user_recommendations` | Song and album recommendations between users                                               |
 
 ### Key Relationships
+-< represents one to many (1:N), -> represents many to one, -- represents many to many (M:N)
 
 ```
 artists ──< albums ──< songs
    │           │
-   └── genres ─┘  (Many-to-many via artist_genre, album_genre)
+   └── genres ─┘
 
-users ──< reviews ──> albums / songs
-users ──< lists ──< list_items ──> albums / songs
-users ──< list_members ──> lists
-users ──< user_follows ──> users
-users ──< notifications
-users ──< user_recommendations ──> users
+- users ─< reviews ─> albums / songs
+- users ─< lists ─< list_items ─> albums / songs
+- users ─< list_members ─> lists
+- users ─< user_follows ─> users
+- users ─< notifications
+- users ─< user_recommendations ─> users
 ```
 
 Schema: [`backend/app/models.py`](./backend/app/models.py)
@@ -80,46 +81,36 @@ Migration History: [`alembic/versions/`](./alembic/versions/)
 ### High-Level Diagram
 
 ```
-┌─────────────────────────────────────────────────┐
-│                  User's Browser                 │
-│          React 18 + Vite + Tailwind CSS         │
-│              (hosted on Vercel)                 │
-└────────────────────┬────────────────────────────┘
-                     │ HTTPS (axios, Bearer JWT)
-                     │ VITE_API_BASE_URL
-                     ▼
-┌─────────────────────────────────────────────────┐
-│              FastAPI Backend                    │
-│         SQLAlchemy ORM + Alembic                │
-│             (hosted on Railway)                 │
-│                                                 │
-│  Routers: auth, users, music, lists, social,    │
-│           search, stats, spotify, charts,       │
-│           recommendations, notifications        │
-└──────┬──────────────┬────────────────┬──────────┘
-       │              │                │
-       ▼              ▼                ▼
+┌─────────────────────────────────────────┐                     ┌─────────────────────────────────────────────────┐
+│                Browser                  │  Auth               │                Supabase Auth                    │
+│     React 18 + Vite + Tailwind CSS      │-------------------> │   signUp, sign in, password reset, etc.         │
+│         (hosted on Vercel)              │                     │   JWT issued to browser, validated by backend   │
+└─────────────────────────────────────────┘                     └─────────────────────────────────────────────────┘
+                     | HTTPS Request                                                    |
+                     |                                                                  |
+                     V                                                                  |
+┌─────────────────────────────────────────┐                                             |
+│              FastAPI Backend            │          JWT auth                           |                                      
+│        w/ SQLAlchemy + Alembic          │----------------------------------------------
+│                (Railway)                │
+└─────────────────────────────────────────┘
+       |              |                |
+       V              V                V
 ┌────────────┐  ┌──────────────┐  ┌─────────────┐
-│ PostgreSQL │  │ Spotify API  │  │  OpenAI API │
+│ PostgreSQL │  │ Spotify API  │  │ OpenAI API  │
 │ (Supabase) │  │ (Web API +   │  │ (text-      │
-│            │  │  OAuth 2.0)  │  │  embedding- │
+│            │  │  OAuth)      │  │  embedding- │
 │ pgvector   │  └──────────────┘  │  3-small)   │
 │ extension  │                    └─────────────┘
 └────────────┘
-
-┌─────────────────────────────────────────────────┐
-│                Supabase Auth                    │
-│   signUp / signIn / password reset / JWKS       │
-│   JWT issued to browser, validated by backend   │
-└─────────────────────────────────────────────────┘
 ```
 
 ### Authentication Flow
 
 1. User signs in the browser and Supabase returns a signed JWT.
-2. The frontend sets an API request token.
+2. Frontend sets an API request token.
 3.  FastAPI backend fetches Supabase's JWKS endpoint and validates the signature.
-4. On the first login, the backend creates a `users` row linked to the Supabase user ID. All subsequent requests look up the user by the ID.
+4. At first login, the backend creates a `users` row linked to the Supabase user ID. All following requests will look up the user by the ID.
 
 ### Database Seeding / External Data
 
