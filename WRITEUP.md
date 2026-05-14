@@ -1,12 +1,12 @@
 # Final Write-Up
 
-## Mission
+## I. Mission
 
 Tunelog is a catalog for music, that allows users to log what they've listened to, write and share reviews, build curated lists, follow people with similar interests, and discover music that matches their taste.
 
 The core original problem is that there are few updated social platforms that centers around curation and reviewing of music. Tunelog solves this problem by offering a review and rating system, collaborative lists, and a semantic search engine that understands mood.
 
-## Schema
+## II. Schema
 
 The database has 18 tables that are managed through Alembic. 
 The table definitions are in [`backend/app/models.py`](./backend/app/models.py). The migration history is defined in [`alembic/versions/`](./alembic/versions/).
@@ -67,7 +67,7 @@ artists ──< albums ──< songs
 - users ─< user_recommendations ─> users
 ```
 
-## Architecture
+## III. Architecture
 
 ### High-Level Diagram
 
@@ -96,8 +96,6 @@ artists ──< albums ──< songs
 └────────────┘
 ```
 
-### Authentication Flow
-
 1. User signs in the browser and Supabase returns a signed JWT.
 2. Frontend sets an API request token.
 3.  FastAPI backend fetches Supabase's JWKS endpoint and validates the signature.
@@ -107,7 +105,7 @@ artists ──< albums ──< songs
 
 Artists, albums, songs, album covers, genres, and audio clips can be imported using the **Spotify Web API**. This runs in the background so it doesn't block the server from accepting other requests.
 
-## Important Queries
+## IV. Important Queries
 
 ### 1. Creating a review
 
@@ -142,8 +140,6 @@ background_tasks.add_task(reembed_album_bg, album_id)
 
 **Indexing Strategy:** The query uses a composite index with a B+ tree setup. The query uses a composite index on `reviews.(user_id, album_id)`. 
 
----
-
 ### 2. Following a user with a private account
 
 The follow system flow depends on whether the user's account is private. Public accounts get an immediate follow, an activity log, and a notification. Private accounts instead create a `follow_requests` and notify the target user to approve or deny the request.
@@ -174,7 +170,7 @@ db.commit()
 
 **Indexing Strategy:** The query uses a composite index with a B+ tree setup. The query for who the user is following and the user's followers use the composite key `user_follows.(follower_id, followed_id)`. This is the same for `follow_requests.(requester_id, target_id)`.
 
----
+
 
 ### 3. Adding a song to a list (role-based access control)
 
@@ -203,10 +199,8 @@ db.commit()
 
 **Indexing Strategy:** The query uses a composite index with a B+ tree setup. The query uses the composite key `list_members.(list_id, user_id)`.
 
----
 
-
-## Complexity Component: Semantic Search w/ Pgvector and OpenAI Embeddings
+## V. Complexity Component: Semantic Search w/ Pgvector and OpenAI Embeddings
 The complexity component is implementing semantic search, which recommends users songs, artists, and albums by mood or feel rather than title or artist name. This goes for the home page recommendations and search output.
 
 When content is added to the catalog (Spotify import or review), the backend calls OpenAI's `text-embedding-3-small` API to embed a text representation. The vectors are stored in the `embedding` column on `artists`, `albums`, `songs`, and `users`, which occurs as a background task.
@@ -219,9 +213,7 @@ When a user interacts with an album or song on the recommendations list, the rec
 
 A backfill API is also used to embed any unindexed content in batches.
 
----
-
-## The Journey
+## VI. Development Experience
 
 
 Overall, the stack allowed for easy implementation of core logic. The FastAPI backend made it easy to test API endpoints in isolation to make sure they were sending back a 200 response, while SQLAlchemy made it easy to handle queries cleanly. Alembic was useful in schema migrations and resolving issues when the schema needed to be rolled back.
@@ -236,12 +228,11 @@ Lastly, there was difficulty in anticipating interactions between users that are
 ### AI-Assisted Development
 
 Claude was useful for implementing boilerplate code, with Alembic migration templates, rough architecture and API design, rough schema generation, CSS styling, etc. Claude was also useful in debugging, such as the pgvector connection pool error, conflicts with Spotify state JWT, etc. 
-
 Claude was used to implement fallback logic when attempting to catch several issues, specifically with the OpenAI API rate limiting for background embedding.
+However, it was difficult to tweak the UI and to place all elements in reasonable locations with Claude.
 
----
 
-## Scaling
+## VII. Scaling
 
 To evolve this architecture to support one million users, read replica pools for read queries can be used to handle increased request load for the database layer. 
 In addition, partitioning the highest-write tables by user id hash range can make index sizes to be more manageable. 

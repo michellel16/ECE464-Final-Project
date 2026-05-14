@@ -2,8 +2,6 @@
 
 Tunelog is a music cataloging and sharing platform with Spotify integration. Users can review albums and songs, build curated lists, follow friends, and discover new music.
 
----
-
 ## Links
 
 |                    | |
@@ -11,8 +9,6 @@ Tunelog is a music cataloging and sharing platform with Spotify integration. Use
 | **Live Web App**   | *https://ece-464-tunelog.vercel.app/* |
 | **Demo Video**     | *https://drive.google.com/file/d/1w9E6hySElTZh-P_e7pXgrmQBR8VdJFby/view?usp=sharing* |
 | **Final Write-up** | [WRITEUP.md](./WRITEUP.md) |
-
----
 
 ## Tech Stack
 
@@ -26,9 +22,7 @@ Tunelog is a music cataloging and sharing platform with Spotify integration. Use
 | Frontend / Client Hosting | Vercel                                |
 | Third-Party App           | Spotify Web API, OpenAI Embeddings API |
 
----
-
-## Local Development
+## Local Development Instructions
 
 ### Prerequisites
 
@@ -104,8 +98,6 @@ See [WRITEUP.md](./WRITEUP.md#architecture) for the architecture setup.
 ### 9. Login with sample account
 Demo account: **musiclover / password123**
 
-
----
 ## Database Migrations
 
 The project uses [Alembic](https://alembic.sqlalchemy.org/) for all schema changes.
